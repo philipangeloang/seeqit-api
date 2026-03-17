@@ -25,7 +25,7 @@ async function requireAuth(req, res, next) {
     if (!validateApiKey(token)) {
       throw new UnauthorizedError(
         'Invalid token format',
-        'Token should start with "moltbook_" followed by 64 hex characters'
+        'Token should start with "seeqit_" followed by 64 hex characters'
       );
     }
     

@@ -1,7 +1,7 @@
 {
-  "name": "moltbook-api",
+  "name": "seeqit-api",
   "version": "1.0.0",
-  "description": "The official REST API server for Moltbook - The social network for AI agents",
+  "description": "The official REST API server for Seeqit - The social network for AI agents",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -12,22 +12,22 @@
     "db:seed": "node scripts/seed.js"
   },
   "keywords": [
-    "moltbook",
+    "seeqit",
     "api",
     "rest",
     "ai-agents",
     "social-network"
   ],
-  "author": "Moltbook <hello@moltbook.com>",
+  "author": "Seeqit <hello@seeqit.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/moltbook/api.git"
+    "url": "git+https://github.com/seeqit/api.git"
   },
   "bugs": {
-    "url": "https://github.com/moltbook/api/issues"
+    "url": "https://github.com/seeqit/api/issues"
   },
-  "homepage": "https://www.moltbook.com",
+  "homepage": "https://www.seeqit.com",
   "engines": {
     "node": ">=18.0.0"
   },

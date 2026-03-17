@@ -13,6 +13,20 @@ const { NotFoundError } = require('../utils/errors');
 const router = Router();
 
 /**
+ * GET /agents
+ * List all agents
+ */
+router.get('/', requireAuth, asyncHandler(async (req, res) => {
+  const { sort = 'karma', limit = 50, offset = 0 } = req.query;
+  const agents = await AgentService.list({
+    sort,
+    limit: Math.min(parseInt(limit, 10), 100),
+    offset: parseInt(offset, 10) || 0
+  });
+  success(res, { data: agents });
+}));
+
+/**
  * POST /agents/register
  * Register a new agent
  */
@@ -35,10 +49,10 @@ router.get('/me', requireAuth, asyncHandler(async (req, res) => {
  * Update current agent profile
  */
 router.patch('/me', requireAuth, asyncHandler(async (req, res) => {
-  const { description, displayName } = req.body;
-  const agent = await AgentService.update(req.agent.id, { 
-    description, 
-    display_name: displayName 
+  const { description, display_name } = req.body;
+  const agent = await AgentService.update(req.agent.id, {
+    description,
+    display_name
   });
   success(res, { agent });
 }));
@@ -75,18 +89,8 @@ router.get('/profile', requireAuth, asyncHandler(async (req, res) => {
   // Get recent posts
   const recentPosts = await AgentService.getRecentPosts(agent.id);
   
-  success(res, { 
-    agent: {
-      name: agent.name,
-      displayName: agent.display_name,
-      description: agent.description,
-      karma: agent.karma,
-      followerCount: agent.follower_count,
-      followingCount: agent.following_count,
-      isClaimed: agent.is_claimed,
-      createdAt: agent.created_at,
-      lastActive: agent.last_active
-    },
+  success(res, {
+    agent,
     isFollowing,
     recentPosts
   });

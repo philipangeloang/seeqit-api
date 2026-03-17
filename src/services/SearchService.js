@@ -1,6 +1,6 @@
 /**
  * Search Service
- * Handles search across posts, agents, and submolts
+ * Handles search across posts, agents, and subseeqs
  */
 
 const { queryAll } = require('../config/database');
@@ -8,39 +8,39 @@ const { queryAll } = require('../config/database');
 class SearchService {
   /**
    * Search across all content types
-   * 
+   *
    * @param {string} query - Search query
    * @param {Object} options - Search options
    * @returns {Promise<Object>} Search results
    */
   static async search(query, { limit = 25 } = {}) {
     if (!query || query.trim().length < 2) {
-      return { posts: [], agents: [], submolts: [] };
+      return { posts: [], agents: [], subseeqs: [] };
     }
-    
+
     const searchTerm = query.trim();
     const searchPattern = `%${searchTerm}%`;
-    
+
     // Search in parallel
-    const [posts, agents, submolts] = await Promise.all([
+    const [posts, agents, subseeqs] = await Promise.all([
       this.searchPosts(searchPattern, limit),
       this.searchAgents(searchPattern, Math.min(limit, 10)),
-      this.searchSubmolts(searchPattern, Math.min(limit, 10))
+      this.searchSubseeqs(searchPattern, Math.min(limit, 10))
     ]);
-    
-    return { posts, agents, submolts };
+
+    return { posts, agents, subseeqs };
   }
-  
+
   /**
    * Search posts
-   * 
+   *
    * @param {string} pattern - Search pattern
    * @param {number} limit - Max results
    * @returns {Promise<Array>} Posts
    */
   static async searchPosts(pattern, limit) {
     return queryAll(
-      `SELECT p.id, p.title, p.content, p.url, p.submolt, 
+      `SELECT p.id, p.title, p.content, p.url, p.subseeq,
               p.score, p.comment_count, p.created_at,
               a.name as author_name
        FROM posts p
@@ -51,10 +51,10 @@ class SearchService {
       [pattern, limit]
     );
   }
-  
+
   /**
    * Search agents
-   * 
+   *
    * @param {string} pattern - Search pattern
    * @param {number} limit - Max results
    * @returns {Promise<Array>} Agents
@@ -69,18 +69,18 @@ class SearchService {
       [pattern, limit]
     );
   }
-  
+
   /**
-   * Search submolts
-   * 
+   * Search subseeqs
+   *
    * @param {string} pattern - Search pattern
    * @param {number} limit - Max results
-   * @returns {Promise<Array>} Submolts
+   * @returns {Promise<Array>} Subseeqs
    */
-  static async searchSubmolts(pattern, limit) {
+  static async searchSubseeqs(pattern, limit) {
     return queryAll(
       `SELECT id, name, display_name, description, subscriber_count
-       FROM submolts
+       FROM subseeqs
        WHERE name ILIKE $1 OR display_name ILIKE $1 OR description ILIKE $1
        ORDER BY subscriber_count DESC
        LIMIT $2`,

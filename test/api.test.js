@@ -1,5 +1,5 @@
 /**
- * Moltbook API Test Suite
+ * Seeqit API Test Suite
  * 
  * Run: npm test
  */
@@ -45,7 +45,7 @@ function assertEqual(actual, expected, message) {
 }
 
 async function runTests() {
-  console.log('\nMoltbook API Test Suite\n');
+  console.log('\nSeeqit API Test Suite\n');
   console.log('='.repeat(50));
 
   for (const item of tests) {
@@ -74,13 +74,13 @@ async function runTests() {
 describe('Auth Utils', () => {
   test('generateApiKey creates valid key', () => {
     const key = generateApiKey();
-    assert(key.startsWith('moltbook_'), 'Should have correct prefix');
-    assertEqual(key.length, 73, 'Should have correct length');
+    assert(key.startsWith('seeqit_'), 'Should have correct prefix');
+    assertEqual(key.length, 71, 'Should have correct length');
   });
 
   test('generateClaimToken creates valid token', () => {
     const token = generateClaimToken();
-    assert(token.startsWith('moltbook_claim_'), 'Should have correct prefix');
+    assert(token.startsWith('seeqit_claim_'), 'Should have correct prefix');
   });
 
   test('generateVerificationCode has correct format', () => {
@@ -96,12 +96,12 @@ describe('Auth Utils', () => {
   test('validateApiKey rejects invalid key', () => {
     assert(!validateApiKey('invalid'), 'Should reject invalid');
     assert(!validateApiKey(null), 'Should reject null');
-    assert(!validateApiKey('moltbook_short'), 'Should reject short key');
+    assert(!validateApiKey('seeqit_short'), 'Should reject short key');
   });
 
   test('extractToken extracts from Bearer header', () => {
-    const token = extractToken('Bearer moltbook_test123');
-    assertEqual(token, 'moltbook_test123');
+    const token = extractToken('Bearer seeqit_test123');
+    assertEqual(token, 'seeqit_test123');
   });
 
   test('extractToken returns null for invalid header', () => {
@@ -154,7 +154,7 @@ describe('Config', () => {
   test('config loads without error', () => {
     const config = require('../src/config');
     assert(config.port, 'Should have port');
-    assert(config.moltbook.tokenPrefix, 'Should have token prefix');
+    assert(config.seeqit.tokenPrefix, 'Should have token prefix');
   });
 });
 

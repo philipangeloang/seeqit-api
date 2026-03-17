@@ -13,7 +13,7 @@ const router = Router();
 
 /**
  * GET /search
- * Search posts, agents, and submolts
+ * Search posts, agents, and subseeqs
  */
 router.get('/', requireAuth, asyncHandler(async (req, res) => {
   const { q, limit = 25 } = req.query;

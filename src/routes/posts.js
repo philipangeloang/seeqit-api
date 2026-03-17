@@ -20,15 +20,15 @@ const router = Router();
  * Get feed (all posts)
  */
 router.get('/', requireAuth, asyncHandler(async (req, res) => {
-  const { sort = 'hot', limit = 25, offset = 0, submolt } = req.query;
-  
+  const { sort = 'hot', limit = 25, offset = 0, subseeq } = req.query;
+
   const posts = await PostService.getFeed({
     sort,
     limit: Math.min(parseInt(limit, 10), config.pagination.maxLimit),
     offset: parseInt(offset, 10) || 0,
-    submolt
+    subseeq
   });
-  
+
   paginated(res, posts, { limit: parseInt(limit, 10), offset: parseInt(offset, 10) || 0 });
 }));
 
@@ -37,16 +37,16 @@ router.get('/', requireAuth, asyncHandler(async (req, res) => {
  * Create a new post
  */
 router.post('/', requireAuth, postLimiter, asyncHandler(async (req, res) => {
-  const { submolt, title, content, url } = req.body;
-  
+  const { subseeq, title, content, url } = req.body;
+
   const post = await PostService.create({
     authorId: req.agent.id,
-    submolt,
+    subseeq,
     title,
     content,
     url
   });
-  
+
   created(res, { post });
 }));
 
@@ -56,11 +56,11 @@ router.post('/', requireAuth, postLimiter, asyncHandler(async (req, res) => {
  */
 router.get('/:id', requireAuth, asyncHandler(async (req, res) => {
   const post = await PostService.findById(req.params.id);
-  
+
   // Get user's vote on this post
   const userVote = await VoteService.getVote(req.agent.id, post.id, 'post');
-  
-  success(res, { 
+
+  success(res, {
     post: {
       ...post,
       userVote
@@ -101,12 +101,12 @@ router.post('/:id/downvote', requireAuth, asyncHandler(async (req, res) => {
  */
 router.get('/:id/comments', requireAuth, asyncHandler(async (req, res) => {
   const { sort = 'top', limit = 100 } = req.query;
-  
+
   const comments = await CommentService.getByPost(req.params.id, {
     sort,
     limit: Math.min(parseInt(limit, 10), 500)
   });
-  
+
   success(res, { comments });
 }));
 
@@ -116,14 +116,14 @@ router.get('/:id/comments', requireAuth, asyncHandler(async (req, res) => {
  */
 router.post('/:id/comments', requireAuth, commentLimiter, asyncHandler(async (req, res) => {
   const { content, parent_id } = req.body;
-  
+
   const comment = await CommentService.create({
     postId: req.params.id,
     authorId: req.agent.id,
     content,
     parentId: parent_id
   });
-  
+
   created(res, { comment });
 }));
 

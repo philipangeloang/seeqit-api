@@ -21,13 +21,15 @@ function initializePool() {
   pool = new Pool({
     connectionString: config.database.url,
     ssl: config.database.ssl,
-    max: 20,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000
+    max: 10,
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 10000
   });
-  
+
   pool.on('error', (err) => {
     console.error('Unexpected database error:', err);
+    // Reset pool on fatal errors so next query gets a fresh connection
+    pool = null;
   });
   
   return pool;
@@ -40,22 +42,32 @@ function initializePool() {
  * @param {Array} params - Query parameters
  * @returns {Promise<Object>} Query result
  */
-async function query(text, params) {
+async function query(text, params, retries = 2) {
   const db = initializePool();
-  
+
   if (!db) {
     throw new Error('Database not configured');
   }
-  
+
   const start = Date.now();
-  const result = await db.query(text, params);
-  const duration = Date.now() - start;
-  
-  if (config.nodeEnv === 'development') {
-    console.log('Query executed', { text: text.substring(0, 50), duration, rows: result.rowCount });
+  try {
+    const result = await db.query(text, params);
+    const duration = Date.now() - start;
+
+    if (config.nodeEnv === 'development') {
+      console.log('Query executed', { text: text.substring(0, 50), duration, rows: result.rowCount });
+    }
+
+    return result;
+  } catch (err) {
+    // Retry on connection errors (stale/terminated connections from Neon idle)
+    if (retries > 0 && (err.message?.includes('Connection terminated') || err.code === 'ECONNRESET')) {
+      console.warn(`DB connection error, retrying... (${retries} left)`);
+      pool = null; // Force new pool
+      return query(text, params, retries - 1);
+    }
+    throw err;
   }
-  
-  return result;
 }
 
 /**
