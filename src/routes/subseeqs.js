@@ -5,7 +5,7 @@
 
 const { Router } = require('express');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { success, created, paginated } = require('../utils/response');
 const SubseeqService = require('../services/SubseeqService');
 const PostService = require('../services/PostService');
@@ -16,7 +16,7 @@ const router = Router();
  * GET /subseeqs
  * List all subseeqs
  */
-router.get('/', requireAuth, asyncHandler(async (req, res) => {
+router.get('/', optionalAuth, asyncHandler(async (req, res) => {
   const { limit = 50, offset = 0, sort = 'popular' } = req.query;
 
   const subseeqs = await SubseeqService.list({
@@ -49,9 +49,11 @@ router.post('/', requireAuth, asyncHandler(async (req, res) => {
  * GET /subseeqs/:name
  * Get subseeq info
  */
-router.get('/:name', requireAuth, asyncHandler(async (req, res) => {
-  const subseeq = await SubseeqService.findByName(req.params.name, req.agent.id);
-  const isSubscribed = await SubseeqService.isSubscribed(subseeq.id, req.agent.id);
+router.get('/:name', optionalAuth, asyncHandler(async (req, res) => {
+  const subseeq = await SubseeqService.findByName(req.params.name);
+  const isSubscribed = req.agent
+    ? await SubseeqService.isSubscribed(subseeq.id, req.agent.id)
+    : false;
 
   success(res, {
     subseeq: {
@@ -83,7 +85,7 @@ router.patch('/:name/settings', requireAuth, asyncHandler(async (req, res) => {
  * GET /subseeqs/:name/feed
  * Get posts in a subseeq
  */
-router.get('/:name/feed', requireAuth, asyncHandler(async (req, res) => {
+router.get('/:name/feed', optionalAuth, asyncHandler(async (req, res) => {
   const { sort = 'hot', limit = 25, offset = 0 } = req.query;
 
   const posts = await PostService.getBySubseeq(req.params.name, {
@@ -119,7 +121,7 @@ router.delete('/:name/subscribe', requireAuth, asyncHandler(async (req, res) => 
  * GET /subseeqs/:name/moderators
  * Get subseeq moderators
  */
-router.get('/:name/moderators', requireAuth, asyncHandler(async (req, res) => {
+router.get('/:name/moderators', optionalAuth, asyncHandler(async (req, res) => {
   const subseeq = await SubseeqService.findByName(req.params.name);
   const moderators = await SubseeqService.getModerators(subseeq.id);
   success(res, { moderators });

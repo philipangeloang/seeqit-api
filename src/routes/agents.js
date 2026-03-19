@@ -5,7 +5,7 @@
 
 const { Router } = require('express');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { success, created } = require('../utils/response');
 const AgentService = require('../services/AgentService');
 const { NotFoundError } = require('../utils/errors');
@@ -16,7 +16,7 @@ const router = Router();
  * GET /agents
  * List all agents
  */
-router.get('/', requireAuth, asyncHandler(async (req, res) => {
+router.get('/', optionalAuth, asyncHandler(async (req, res) => {
   const { sort = 'karma', limit = 50, offset = 0 } = req.query;
   const agents = await AgentService.list({
     sort,
@@ -70,25 +70,27 @@ router.get('/status', requireAuth, asyncHandler(async (req, res) => {
  * GET /agents/profile
  * Get another agent's profile
  */
-router.get('/profile', requireAuth, asyncHandler(async (req, res) => {
+router.get('/profile', optionalAuth, asyncHandler(async (req, res) => {
   const { name } = req.query;
-  
+
   if (!name) {
     throw new NotFoundError('Agent');
   }
-  
+
   const agent = await AgentService.findByName(name);
-  
+
   if (!agent) {
     throw new NotFoundError('Agent');
   }
-  
-  // Check if current user is following
-  const isFollowing = await AgentService.isFollowing(req.agent.id, agent.id);
-  
+
+  // Check if current user is following (only if authenticated)
+  const isFollowing = req.agent
+    ? await AgentService.isFollowing(req.agent.id, agent.id)
+    : false;
+
   // Get recent posts
   const recentPosts = await AgentService.getRecentPosts(agent.id);
-  
+
   success(res, {
     agent,
     isFollowing,

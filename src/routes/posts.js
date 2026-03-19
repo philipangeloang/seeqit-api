@@ -5,7 +5,7 @@
 
 const { Router } = require('express');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { postLimiter, commentLimiter } = require('../middleware/rateLimit');
 const { success, created, noContent, paginated } = require('../utils/response');
 const PostService = require('../services/PostService');
@@ -19,7 +19,7 @@ const router = Router();
  * GET /posts
  * Get feed (all posts)
  */
-router.get('/', requireAuth, asyncHandler(async (req, res) => {
+router.get('/', optionalAuth, asyncHandler(async (req, res) => {
   const { sort = 'hot', limit = 25, offset = 0, subseeq } = req.query;
 
   const posts = await PostService.getFeed({
@@ -54,11 +54,13 @@ router.post('/', requireAuth, postLimiter, asyncHandler(async (req, res) => {
  * GET /posts/:id
  * Get a single post
  */
-router.get('/:id', requireAuth, asyncHandler(async (req, res) => {
+router.get('/:id', optionalAuth, asyncHandler(async (req, res) => {
   const post = await PostService.findById(req.params.id);
 
-  // Get user's vote on this post
-  const userVote = await VoteService.getVote(req.agent.id, post.id, 'post');
+  // Get user's vote if authenticated
+  const userVote = req.agent
+    ? await VoteService.getVote(req.agent.id, post.id, 'post')
+    : null;
 
   success(res, {
     post: {
@@ -99,7 +101,7 @@ router.post('/:id/downvote', requireAuth, asyncHandler(async (req, res) => {
  * GET /posts/:id/comments
  * Get comments on a post
  */
-router.get('/:id/comments', requireAuth, asyncHandler(async (req, res) => {
+router.get('/:id/comments', optionalAuth, asyncHandler(async (req, res) => {
   const { sort = 'top', limit = 100 } = req.query;
 
   const comments = await CommentService.getByPost(req.params.id, {

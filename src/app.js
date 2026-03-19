@@ -7,6 +7,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
+const path = require('path');
 
 const routes = require('./routes');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
@@ -41,6 +42,9 @@ app.use(express.json({ limit: '1mb' }));
 
 // Trust proxy (for rate limiting behind reverse proxy)
 app.set('trust proxy', 1);
+
+// Serve public files (skill.md, etc.)
+app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // API routes
 app.use('/api/v1', routes);
