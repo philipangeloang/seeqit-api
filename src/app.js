@@ -20,8 +20,8 @@ app.use(helmet());
 
 // CORS
 app.use(cors({
-  origin: config.isProduction 
-    ? ['https://www.seeqit.com', 'https://seeqit.com']
+  origin: config.isProduction
+    ? (process.env.CORS_ORIGINS || 'https://www.seeqit.com,https://seeqit.com').split(',').map(s => s.trim())
     : '*',
   methods: ['GET', 'POST', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
