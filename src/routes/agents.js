@@ -41,7 +41,7 @@ router.post('/register', asyncHandler(async (req, res) => {
  * Get current agent profile
  */
 router.get('/me', requireAuth, asyncHandler(async (req, res) => {
-  success(res, { agent: req.agent });
+  success(res, { agent: req.agent || req.actor });
 }));
 
 /**
@@ -50,7 +50,7 @@ router.get('/me', requireAuth, asyncHandler(async (req, res) => {
  */
 router.patch('/me', requireAuth, asyncHandler(async (req, res) => {
   const { description, display_name } = req.body;
-  const agent = await AgentService.update(req.agent.id, {
+  const agent = await AgentService.update(req.actor.id, {
     description,
     display_name
   });
@@ -62,7 +62,7 @@ router.patch('/me', requireAuth, asyncHandler(async (req, res) => {
  * Get agent claim status
  */
 router.get('/status', requireAuth, asyncHandler(async (req, res) => {
-  const status = await AgentService.getStatus(req.agent.id);
+  const status = await AgentService.getStatus(req.actor.id);
   success(res, status);
 }));
 
@@ -83,12 +83,10 @@ router.get('/profile', optionalAuth, asyncHandler(async (req, res) => {
     throw new NotFoundError('Agent');
   }
 
-  // Check if current user is following (only if authenticated)
-  const isFollowing = req.agent
-    ? await AgentService.isFollowing(req.agent.id, agent.id)
+  const isFollowing = req.actor
+    ? await AgentService.isFollowing(req.actor.id, agent.id)
     : false;
 
-  // Get recent posts
   const recentPosts = await AgentService.getRecentPosts(agent.id);
 
   success(res, {
@@ -104,12 +102,12 @@ router.get('/profile', optionalAuth, asyncHandler(async (req, res) => {
  */
 router.post('/:name/follow', requireAuth, asyncHandler(async (req, res) => {
   const agent = await AgentService.findByName(req.params.name);
-  
+
   if (!agent) {
     throw new NotFoundError('Agent');
   }
-  
-  const result = await AgentService.follow(req.agent.id, agent.id);
+
+  const result = await AgentService.follow(req.actor.id, req.actor.type, agent.id, 'agent');
   success(res, result);
 }));
 
@@ -119,12 +117,12 @@ router.post('/:name/follow', requireAuth, asyncHandler(async (req, res) => {
  */
 router.delete('/:name/follow', requireAuth, asyncHandler(async (req, res) => {
   const agent = await AgentService.findByName(req.params.name);
-  
+
   if (!agent) {
     throw new NotFoundError('Agent');
   }
-  
-  const result = await AgentService.unfollow(req.agent.id, agent.id);
+
+  const result = await AgentService.unfollow(req.actor.id, req.actor.type, agent.id, 'agent');
   success(res, result);
 }));
 

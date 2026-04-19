@@ -39,7 +39,8 @@ router.post('/', requireAuth, asyncHandler(async (req, res) => {
     name,
     displayName: display_name,
     description,
-    creatorId: req.agent.id
+    creatorId: req.actor.id,
+    creatorType: req.actor.type
   });
 
   created(res, { subseeq });
@@ -50,9 +51,9 @@ router.post('/', requireAuth, asyncHandler(async (req, res) => {
  * Get subseeq info
  */
 router.get('/:name', optionalAuth, asyncHandler(async (req, res) => {
-  const subseeq = await SubseeqService.findByName(req.params.name);
-  const isSubscribed = req.agent
-    ? await SubseeqService.isSubscribed(subseeq.id, req.agent.id)
+  const subseeq = await SubseeqService.findByName(req.params.name, req.actor?.id);
+  const isSubscribed = req.actor
+    ? await SubseeqService.isSubscribed(subseeq.id, req.actor.id)
     : false;
 
   success(res, {
@@ -71,7 +72,7 @@ router.patch('/:name/settings', requireAuth, asyncHandler(async (req, res) => {
   const subseeq = await SubseeqService.findByName(req.params.name);
   const { description, display_name, banner_color, theme_color } = req.body;
 
-  const updated = await SubseeqService.update(subseeq.id, req.agent.id, {
+  const updated = await SubseeqService.update(subseeq.id, req.actor.id, {
     description,
     display_name,
     banner_color,
@@ -103,7 +104,7 @@ router.get('/:name/feed', optionalAuth, asyncHandler(async (req, res) => {
  */
 router.post('/:name/subscribe', requireAuth, asyncHandler(async (req, res) => {
   const subseeq = await SubseeqService.findByName(req.params.name);
-  const result = await SubseeqService.subscribe(subseeq.id, req.agent.id);
+  const result = await SubseeqService.subscribe(subseeq.id, req.actor.id, req.actor.type);
   success(res, result);
 }));
 
@@ -113,7 +114,7 @@ router.post('/:name/subscribe', requireAuth, asyncHandler(async (req, res) => {
  */
 router.delete('/:name/subscribe', requireAuth, asyncHandler(async (req, res) => {
   const subseeq = await SubseeqService.findByName(req.params.name);
-  const result = await SubseeqService.unsubscribe(subseeq.id, req.agent.id);
+  const result = await SubseeqService.unsubscribe(subseeq.id, req.actor.id);
   success(res, result);
 }));
 
@@ -137,7 +138,7 @@ router.post('/:name/moderators', requireAuth, asyncHandler(async (req, res) => {
 
   const result = await SubseeqService.addModerator(
     subseeq.id,
-    req.agent.id,
+    req.actor.id,
     agent_name,
     role || 'moderator'
   );
@@ -153,7 +154,7 @@ router.delete('/:name/moderators', requireAuth, asyncHandler(async (req, res) =>
   const subseeq = await SubseeqService.findByName(req.params.name);
   const { agent_name } = req.body;
 
-  const result = await SubseeqService.removeModerator(subseeq.id, req.agent.id, agent_name);
+  const result = await SubseeqService.removeModerator(subseeq.id, req.actor.id, agent_name);
   success(res, result);
 }));
 

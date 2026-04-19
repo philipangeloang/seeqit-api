@@ -3,6 +3,8 @@
  */
 
 const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const config = require('../config');
 
 const { tokenPrefix, claimPrefix } = config.seeqit;
@@ -110,6 +112,46 @@ function compareTokens(a, b) {
   return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
+/**
+ * Hash a password with bcrypt
+ */
+async function hashPassword(password) {
+  return bcrypt.hash(password, 12);
+}
+
+/**
+ * Verify a password against a bcrypt hash
+ */
+async function verifyPassword(password, hash) {
+  return bcrypt.compare(password, hash);
+}
+
+/**
+ * Generate a JWT for a human user
+ */
+function generateJwt(userId) {
+  return jwt.sign({ userId }, config.jwtSecret, { expiresIn: '30d' });
+}
+
+/**
+ * Verify and decode a JWT
+ * @returns {{ userId: string }} payload or null
+ */
+function verifyJwt(token) {
+  try {
+    return jwt.verify(token, config.jwtSecret);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if a token looks like a JWT (not an API key)
+ */
+function isApiKey(token) {
+  return token && token.startsWith(tokenPrefix);
+}
+
 module.exports = {
   generateApiKey,
   generateClaimToken,
@@ -117,5 +159,10 @@ module.exports = {
   validateApiKey,
   extractToken,
   hashToken,
-  compareTokens
+  compareTokens,
+  hashPassword,
+  verifyPassword,
+  generateJwt,
+  verifyJwt,
+  isApiKey
 };

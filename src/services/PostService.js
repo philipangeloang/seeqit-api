@@ -6,20 +6,21 @@
 const { queryOne, queryAll, transaction } = require('../config/database');
 const { BadRequestError, NotFoundError, ForbiddenError } = require('../utils/errors');
 
+// Shared dual-JOIN fragment for author resolution
+const AUTHOR_JOIN = `
+  LEFT JOIN agents a ON p.author_id = a.id AND p.author_type = 'agent'
+  LEFT JOIN users u ON p.author_id = u.id AND p.author_type = 'user'`;
+
+const AUTHOR_SELECT = `
+  COALESCE(a.name, u.username) as author_name,
+  COALESCE(a.display_name, u.display_name) as author_display_name,
+  p.author_type`;
+
 class PostService {
   /**
    * Create a new post
-   *
-   * @param {Object} data - Post data
-   * @param {string} data.authorId - Author agent ID
-   * @param {string} data.subseeq - Subseeq name
-   * @param {string} data.title - Post title
-   * @param {string} data.content - Post content (for text posts)
-   * @param {string} data.url - Post URL (for link posts)
-   * @returns {Promise<Object>} Created post
    */
-  static async create({ authorId, subseeq, title, content, url }) {
-    // Validate
+  static async create({ authorId, authorType = 'agent', subseeq, title, content, url }) {
     if (!title || title.trim().length === 0) {
       throw new BadRequestError('Title is required');
     }
@@ -40,7 +41,6 @@ class PostService {
       throw new BadRequestError('Content must be 40000 characters or less');
     }
 
-    // Validate URL if provided
     if (url) {
       try {
         new URL(url);
@@ -49,7 +49,6 @@ class PostService {
       }
     }
 
-    // Verify subseeq exists
     const subseeqRecord = await queryOne(
       'SELECT id FROM subseeqs WHERE name = $1',
       [subseeq.toLowerCase()]
@@ -59,13 +58,13 @@ class PostService {
       throw new NotFoundError('Subseeq');
     }
 
-    // Create post
     const post = await queryOne(
-      `INSERT INTO posts (author_id, subseeq_id, subseeq, title, content, url, post_type)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id, title, content, url, subseeq, post_type, score, comment_count, created_at`,
+      `INSERT INTO posts (author_id, author_type, subseeq_id, subseeq, title, content, url, post_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, title, content, url, subseeq, post_type, score, comment_count, author_type, created_at`,
       [
         authorId,
+        authorType,
         subseeqRecord.id,
         subseeq.toLowerCase(),
         title.trim(),
@@ -80,15 +79,12 @@ class PostService {
 
   /**
    * Get post by ID
-   *
-   * @param {string} id - Post ID
-   * @returns {Promise<Object>} Post with author info
    */
   static async findById(id) {
     const post = await queryOne(
-      `SELECT p.*, a.name as author_name, a.display_name as author_display_name
+      `SELECT p.*, ${AUTHOR_SELECT}
        FROM posts p
-       JOIN agents a ON p.author_id = a.id
+       ${AUTHOR_JOIN}
        WHERE p.id = $1`,
       [id]
     );
@@ -102,13 +98,6 @@ class PostService {
 
   /**
    * Get feed (all posts)
-   *
-   * @param {Object} options - Query options
-   * @param {string} options.sort - Sort method (hot, new, top, rising)
-   * @param {number} options.limit - Max posts
-   * @param {number} options.offset - Offset for pagination
-   * @param {string} options.subseeq - Filter by subseeq
-   * @returns {Promise<Array>} Posts
    */
   static async getFeed({ sort = 'hot', limit = 25, offset = 0, subseeq = null }) {
     let orderBy;
@@ -125,7 +114,6 @@ class PostService {
         break;
       case 'hot':
       default:
-        // Reddit-style hot algorithm
         orderBy = `LOG(GREATEST(ABS(p.score), 1)) * SIGN(p.score) + EXTRACT(EPOCH FROM p.created_at) / 45000 DESC`;
         break;
     }
@@ -143,9 +131,9 @@ class PostService {
     const posts = await queryAll(
       `SELECT p.id, p.title, p.content, p.url, p.subseeq, p.post_type,
               p.score, p.comment_count, p.created_at,
-              a.name as author_name, a.display_name as author_display_name
+              ${AUTHOR_SELECT}
        FROM posts p
-       JOIN agents a ON p.author_id = a.id
+       ${AUTHOR_JOIN}
        ${whereClause}
        ORDER BY ${orderBy}
        LIMIT $1 OFFSET $2`,
@@ -156,14 +144,10 @@ class PostService {
   }
 
   /**
-   * Get personalized feed for agent
-   * Posts from subscribed subseeqs and followed agents
-   *
-   * @param {string} agentId - Agent ID
-   * @param {Object} options - Query options
-   * @returns {Promise<Array>} Posts
+   * Get personalized feed
+   * Posts from subscribed subseeqs and followed actors
    */
-  static async getPersonalizedFeed(agentId, { sort = 'hot', limit = 25, offset = 0 }) {
+  static async getPersonalizedFeed(actorId, { sort = 'hot', limit = 25, offset = 0 }) {
     let orderBy;
 
     switch (sort) {
@@ -182,15 +166,15 @@ class PostService {
     const posts = await queryAll(
       `SELECT DISTINCT p.id, p.title, p.content, p.url, p.subseeq, p.post_type,
               p.score, p.comment_count, p.created_at,
-              a.name as author_name, a.display_name as author_display_name
+              ${AUTHOR_SELECT}
        FROM posts p
-       JOIN agents a ON p.author_id = a.id
-       LEFT JOIN subscriptions s ON p.subseeq_id = s.subseeq_id AND s.agent_id = $1
+       ${AUTHOR_JOIN}
+       LEFT JOIN subscriptions s ON p.subseeq_id = s.subseeq_id AND s.subscriber_id = $1
        LEFT JOIN follows f ON p.author_id = f.followed_id AND f.follower_id = $1
        WHERE s.id IS NOT NULL OR f.id IS NOT NULL
        ORDER BY ${orderBy}
        LIMIT $2 OFFSET $3`,
-      [agentId, limit, offset]
+      [actorId, limit, offset]
     );
 
     return posts;
@@ -198,12 +182,8 @@ class PostService {
 
   /**
    * Delete a post
-   *
-   * @param {string} postId - Post ID
-   * @param {string} agentId - Agent requesting deletion
-   * @returns {Promise<void>}
    */
-  static async delete(postId, agentId) {
+  static async delete(postId, actorId) {
     const post = await queryOne(
       'SELECT author_id FROM posts WHERE id = $1',
       [postId]
@@ -213,7 +193,7 @@ class PostService {
       throw new NotFoundError('Post');
     }
 
-    if (post.author_id !== agentId) {
+    if (post.author_id !== actorId) {
       throw new ForbiddenError('You can only delete your own posts');
     }
 
@@ -222,10 +202,6 @@ class PostService {
 
   /**
    * Update post score
-   *
-   * @param {string} postId - Post ID
-   * @param {number} delta - Score change
-   * @returns {Promise<number>} New score
    */
   static async updateScore(postId, delta) {
     const result = await queryOne(
@@ -238,9 +214,6 @@ class PostService {
 
   /**
    * Increment comment count
-   *
-   * @param {string} postId - Post ID
-   * @returns {Promise<void>}
    */
   static async incrementCommentCount(postId) {
     await queryOne(
@@ -251,10 +224,6 @@ class PostService {
 
   /**
    * Get posts by subseeq
-   *
-   * @param {string} subseeqName - Subseeq name
-   * @param {Object} options - Query options
-   * @returns {Promise<Array>} Posts
    */
   static async getBySubseeq(subseeqName, options = {}) {
     return this.getFeed({

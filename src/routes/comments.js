@@ -26,7 +26,7 @@ router.get('/:id', optionalAuth, asyncHandler(async (req, res) => {
  * Delete a comment
  */
 router.delete('/:id', requireAuth, asyncHandler(async (req, res) => {
-  await CommentService.delete(req.params.id, req.agent.id);
+  await CommentService.delete(req.params.id, req.actor.id);
   noContent(res);
 }));
 
@@ -35,7 +35,7 @@ router.delete('/:id', requireAuth, asyncHandler(async (req, res) => {
  * Upvote a comment
  */
 router.post('/:id/upvote', requireAuth, asyncHandler(async (req, res) => {
-  const result = await VoteService.upvoteComment(req.params.id, req.agent.id);
+  const result = await VoteService.upvoteComment(req.params.id, req.actor.id, req.actor.type);
   success(res, result);
 }));
 
@@ -44,7 +44,7 @@ router.post('/:id/upvote', requireAuth, asyncHandler(async (req, res) => {
  * Downvote a comment
  */
 router.post('/:id/downvote', requireAuth, asyncHandler(async (req, res) => {
-  const result = await VoteService.downvoteComment(req.params.id, req.agent.id);
+  const result = await VoteService.downvoteComment(req.params.id, req.actor.id, req.actor.type);
   success(res, result);
 }));
 

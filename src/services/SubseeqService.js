@@ -9,16 +9,8 @@ const { BadRequestError, NotFoundError, ConflictError, ForbiddenError } = requir
 class SubseeqService {
   /**
    * Create a new subseeq
-   *
-   * @param {Object} data - Subseeq data
-   * @param {string} data.name - Subseeq name (lowercase, no spaces)
-   * @param {string} data.displayName - Display name
-   * @param {string} data.description - Description
-   * @param {string} data.creatorId - Creator agent ID
-   * @returns {Promise<Object>} Created subseeq
    */
-  static async create({ name, displayName, description = '', creatorId }) {
-    // Validate name
+  static async create({ name, displayName, description = '', creatorId, creatorType = 'agent' }) {
     if (!name || typeof name !== 'string') {
       throw new BadRequestError('Name is required');
     }
@@ -35,13 +27,11 @@ class SubseeqService {
       );
     }
 
-    // Reserved names
     const reserved = ['admin', 'mod', 'api', 'www', 'seeqit', 'subseeq', 'all', 'popular'];
     if (reserved.includes(normalizedName)) {
       throw new BadRequestError('This name is reserved');
     }
 
-    // Check if exists
     const existing = await queryOne(
       'SELECT id FROM subseeqs WHERE name = $1',
       [normalizedName]
@@ -51,41 +41,36 @@ class SubseeqService {
       throw new ConflictError('Subseeq name already taken');
     }
 
-    // Create subseeq
     const subseeq = await queryOne(
-      `INSERT INTO subseeqs (name, display_name, description, creator_id)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO subseeqs (name, display_name, description, creator_id, creator_type)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING id, name, display_name, description, subscriber_count, created_at`,
-      [normalizedName, displayName || name, description, creatorId]
+      [normalizedName, displayName || name, description, creatorId, creatorType]
     );
 
     // Add creator as owner
     await queryOne(
-      `INSERT INTO subseeq_moderators (subseeq_id, agent_id, role)
-       VALUES ($1, $2, 'owner')`,
-      [subseeq.id, creatorId]
+      `INSERT INTO subseeq_moderators (subseeq_id, actor_id, actor_type, role)
+       VALUES ($1, $2, $3, 'owner')`,
+      [subseeq.id, creatorId, creatorType]
     );
 
     // Auto-subscribe creator
-    await this.subscribe(subseeq.id, creatorId);
+    await this.subscribe(subseeq.id, creatorId, creatorType);
 
     return subseeq;
   }
 
   /**
    * Get subseeq by name
-   *
-   * @param {string} name - Subseeq name
-   * @param {string} agentId - Optional agent ID for role info
-   * @returns {Promise<Object>} Subseeq
    */
-  static async findByName(name, agentId = null) {
+  static async findByName(name, actorId = null) {
     const subseeq = await queryOne(
       `SELECT s.*,
-              (SELECT role FROM subseeq_moderators WHERE subseeq_id = s.id AND agent_id = $2) as your_role
+              (SELECT role FROM subseeq_moderators WHERE subseeq_id = s.id AND actor_id = $2) as your_role
        FROM subseeqs s
        WHERE s.name = $1`,
-      [name.toLowerCase(), agentId]
+      [name.toLowerCase(), actorId]
     );
 
     if (!subseeq) {
@@ -97,9 +82,6 @@ class SubseeqService {
 
   /**
    * List all subseeqs
-   *
-   * @param {Object} options - Query options
-   * @returns {Promise<Array>} Subseeqs
    */
   static async list({ limit = 50, offset = 0, sort = 'popular' }) {
     let orderBy;
@@ -128,16 +110,11 @@ class SubseeqService {
 
   /**
    * Subscribe to a subseeq
-   *
-   * @param {string} subseeqId - Subseeq ID
-   * @param {string} agentId - Agent ID
-   * @returns {Promise<Object>} Result
    */
-  static async subscribe(subseeqId, agentId) {
-    // Check if already subscribed
+  static async subscribe(subseeqId, subscriberId, subscriberType = 'agent') {
     const existing = await queryOne(
-      'SELECT id FROM subscriptions WHERE subseeq_id = $1 AND agent_id = $2',
-      [subseeqId, agentId]
+      'SELECT id FROM subscriptions WHERE subseeq_id = $1 AND subscriber_id = $2',
+      [subseeqId, subscriberId]
     );
 
     if (existing) {
@@ -146,8 +123,8 @@ class SubseeqService {
 
     await transaction(async (client) => {
       await client.query(
-        'INSERT INTO subscriptions (subseeq_id, agent_id) VALUES ($1, $2)',
-        [subseeqId, agentId]
+        'INSERT INTO subscriptions (subseeq_id, subscriber_id, subscriber_type) VALUES ($1, $2, $3)',
+        [subseeqId, subscriberId, subscriberType]
       );
 
       await client.query(
@@ -161,15 +138,11 @@ class SubseeqService {
 
   /**
    * Unsubscribe from a subseeq
-   *
-   * @param {string} subseeqId - Subseeq ID
-   * @param {string} agentId - Agent ID
-   * @returns {Promise<Object>} Result
    */
-  static async unsubscribe(subseeqId, agentId) {
+  static async unsubscribe(subseeqId, subscriberId) {
     const result = await queryOne(
-      'DELETE FROM subscriptions WHERE subseeq_id = $1 AND agent_id = $2 RETURNING id',
-      [subseeqId, agentId]
+      'DELETE FROM subscriptions WHERE subseeq_id = $1 AND subscriber_id = $2 RETURNING id',
+      [subseeqId, subscriberId]
     );
 
     if (!result) {
@@ -185,33 +158,23 @@ class SubseeqService {
   }
 
   /**
-   * Check if agent is subscribed
-   *
-   * @param {string} subseeqId - Subseeq ID
-   * @param {string} agentId - Agent ID
-   * @returns {Promise<boolean>}
+   * Check if subscribed
    */
-  static async isSubscribed(subseeqId, agentId) {
+  static async isSubscribed(subseeqId, subscriberId) {
     const result = await queryOne(
-      'SELECT id FROM subscriptions WHERE subseeq_id = $1 AND agent_id = $2',
-      [subseeqId, agentId]
+      'SELECT id FROM subscriptions WHERE subseeq_id = $1 AND subscriber_id = $2',
+      [subseeqId, subscriberId]
     );
     return !!result;
   }
 
   /**
    * Update subseeq settings
-   *
-   * @param {string} subseeqId - Subseeq ID
-   * @param {string} agentId - Agent requesting update
-   * @param {Object} updates - Fields to update
-   * @returns {Promise<Object>} Updated subseeq
    */
-  static async update(subseeqId, agentId, updates) {
-    // Check permissions
+  static async update(subseeqId, actorId, updates) {
     const mod = await queryOne(
-      'SELECT role FROM subseeq_moderators WHERE subseeq_id = $1 AND agent_id = $2',
-      [subseeqId, agentId]
+      'SELECT role FROM subseeq_moderators WHERE subseeq_id = $1 AND actor_id = $2',
+      [subseeqId, actorId]
     );
 
     if (!mod || (mod.role !== 'owner' && mod.role !== 'moderator')) {
@@ -247,15 +210,18 @@ class SubseeqService {
 
   /**
    * Get subseeq moderators
-   *
-   * @param {string} subseeqId - Subseeq ID
-   * @returns {Promise<Array>} Moderators
    */
   static async getModerators(subseeqId) {
     return queryAll(
-      `SELECT a.name, a.display_name, sm.role, sm.created_at
+      `SELECT
+         COALESCE(a.name, u.username) as name,
+         COALESCE(a.display_name, u.display_name) as display_name,
+         sm.actor_type,
+         sm.role,
+         sm.created_at
        FROM subseeq_moderators sm
-       JOIN agents a ON sm.agent_id = a.id
+       LEFT JOIN agents a ON sm.actor_id = a.id AND sm.actor_type = 'agent'
+       LEFT JOIN users u ON sm.actor_id = u.id AND sm.actor_type = 'user'
        WHERE sm.subseeq_id = $1
        ORDER BY sm.role DESC, sm.created_at ASC`,
       [subseeqId]
@@ -264,17 +230,10 @@ class SubseeqService {
 
   /**
    * Add a moderator
-   *
-   * @param {string} subseeqId - Subseeq ID
-   * @param {string} requesterId - Agent requesting (must be owner)
-   * @param {string} agentName - Agent to add
-   * @param {string} role - Role (moderator)
-   * @returns {Promise<Object>} Result
    */
-  static async addModerator(subseeqId, requesterId, agentName, role = 'moderator') {
-    // Check requester is owner
+  static async addModerator(subseeqId, requesterId, actorName, role = 'moderator') {
     const requester = await queryOne(
-      'SELECT role FROM subseeq_moderators WHERE subseeq_id = $1 AND agent_id = $2',
+      'SELECT role FROM subseeq_moderators WHERE subseeq_id = $1 AND actor_id = $2',
       [subseeqId, requesterId]
     );
 
@@ -282,22 +241,26 @@ class SubseeqService {
       throw new ForbiddenError('Only owners can add moderators');
     }
 
-    // Find agent
-    const agent = await queryOne(
-      'SELECT id FROM agents WHERE name = $1',
-      [agentName.toLowerCase()]
-    );
-
-    if (!agent) {
-      throw new NotFoundError('Agent');
+    // Search in both agents and users
+    let targetId, targetType;
+    const agent = await queryOne('SELECT id FROM agents WHERE name = $1', [actorName.toLowerCase()]);
+    if (agent) {
+      targetId = agent.id;
+      targetType = 'agent';
+    } else {
+      const user = await queryOne('SELECT id FROM users WHERE username = $1', [actorName.toLowerCase()]);
+      if (!user) {
+        throw new NotFoundError('Agent or user');
+      }
+      targetId = user.id;
+      targetType = 'user';
     }
 
-    // Add as moderator
     await queryOne(
-      `INSERT INTO subseeq_moderators (subseeq_id, agent_id, role)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (subseeq_id, agent_id) DO UPDATE SET role = $3`,
-      [subseeqId, agent.id, role]
+      `INSERT INTO subseeq_moderators (subseeq_id, actor_id, actor_type, role)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (subseeq_id, actor_id) DO UPDATE SET role = $4`,
+      [subseeqId, targetId, targetType, role]
     );
 
     return { success: true };
@@ -305,16 +268,10 @@ class SubseeqService {
 
   /**
    * Remove a moderator
-   *
-   * @param {string} subseeqId - Subseeq ID
-   * @param {string} requesterId - Agent requesting (must be owner)
-   * @param {string} agentName - Agent to remove
-   * @returns {Promise<Object>} Result
    */
-  static async removeModerator(subseeqId, requesterId, agentName) {
-    // Check requester is owner
+  static async removeModerator(subseeqId, requesterId, actorName) {
     const requester = await queryOne(
-      'SELECT role FROM subseeq_moderators WHERE subseeq_id = $1 AND agent_id = $2',
+      'SELECT role FROM subseeq_moderators WHERE subseeq_id = $1 AND actor_id = $2',
       [subseeqId, requesterId]
     );
 
@@ -322,20 +279,22 @@ class SubseeqService {
       throw new ForbiddenError('Only owners can remove moderators');
     }
 
-    // Find agent
-    const agent = await queryOne(
-      'SELECT id FROM agents WHERE name = $1',
-      [agentName.toLowerCase()]
-    );
-
-    if (!agent) {
-      throw new NotFoundError('Agent');
+    // Search in both agents and users
+    let targetId;
+    const agent = await queryOne('SELECT id FROM agents WHERE name = $1', [actorName.toLowerCase()]);
+    if (agent) {
+      targetId = agent.id;
+    } else {
+      const user = await queryOne('SELECT id FROM users WHERE username = $1', [actorName.toLowerCase()]);
+      if (!user) {
+        throw new NotFoundError('Agent or user');
+      }
+      targetId = user.id;
     }
 
-    // Cannot remove owner
     const target = await queryOne(
-      'SELECT role FROM subseeq_moderators WHERE subseeq_id = $1 AND agent_id = $2',
-      [subseeqId, agent.id]
+      'SELECT role FROM subseeq_moderators WHERE subseeq_id = $1 AND actor_id = $2',
+      [subseeqId, targetId]
     );
 
     if (target?.role === 'owner') {
@@ -343,8 +302,8 @@ class SubseeqService {
     }
 
     await queryOne(
-      'DELETE FROM subseeq_moderators WHERE subseeq_id = $1 AND agent_id = $2',
-      [subseeqId, agent.id]
+      'DELETE FROM subseeq_moderators WHERE subseeq_id = $1 AND actor_id = $2',
+      [subseeqId, targetId]
     );
 
     return { success: true };

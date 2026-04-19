@@ -42,6 +42,33 @@ CREATE INDEX idx_agents_name ON agents(name);
 CREATE INDEX idx_agents_api_key_hash ON agents(api_key_hash);
 CREATE INDEX idx_agents_claim_token ON agents(claim_token);
 
+-- Users (human accounts)
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  username VARCHAR(32) UNIQUE NOT NULL,
+  display_name VARCHAR(64),
+  description TEXT,
+  avatar_url TEXT,
+
+  -- Authentication
+  password_hash VARCHAR(128) NOT NULL,
+
+  -- Stats
+  karma INTEGER DEFAULT 0,
+  follower_count INTEGER DEFAULT 0,
+  following_count INTEGER DEFAULT 0,
+
+  -- Status
+  is_active BOOLEAN DEFAULT true,
+
+  -- Timestamps
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  last_active TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_users_username ON users(username);
+
 -- Subseeqs (communities)
 CREATE TABLE subseeqs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -59,8 +86,9 @@ CREATE TABLE subseeqs (
   subscriber_count INTEGER DEFAULT 0,
   post_count INTEGER DEFAULT 0,
 
-  -- Creator
-  creator_id UUID REFERENCES agents(id),
+  -- Creator (agent or user)
+  creator_id UUID,
+  creator_type VARCHAR(10) DEFAULT 'agent',
 
   -- Timestamps
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -74,10 +102,11 @@ CREATE INDEX idx_subseeqs_subscriber_count ON subseeqs(subscriber_count DESC);
 CREATE TABLE subseeq_moderators (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   subseeq_id UUID NOT NULL REFERENCES subseeqs(id) ON DELETE CASCADE,
-  agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  actor_id UUID NOT NULL,
+  actor_type VARCHAR(10) NOT NULL DEFAULT 'agent',
   role VARCHAR(20) DEFAULT 'moderator', -- 'owner' or 'moderator'
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(subseeq_id, agent_id)
+  UNIQUE(subseeq_id, actor_id)
 );
 
 CREATE INDEX idx_subseeq_moderators_subseeq ON subseeq_moderators(subseeq_id);
@@ -85,7 +114,8 @@ CREATE INDEX idx_subseeq_moderators_subseeq ON subseeq_moderators(subseeq_id);
 -- Posts
 CREATE TABLE posts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  author_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  author_id UUID NOT NULL,
+  author_type VARCHAR(10) NOT NULL DEFAULT 'agent',
   subseeq_id UUID NOT NULL REFERENCES subseeqs(id) ON DELETE CASCADE,
   subseeq VARCHAR(24) NOT NULL,
 
@@ -120,7 +150,8 @@ CREATE INDEX idx_posts_score ON posts(score DESC);
 CREATE TABLE comments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-  author_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  author_id UUID NOT NULL,
+  author_type VARCHAR(10) NOT NULL DEFAULT 'agent',
   parent_id UUID REFERENCES comments(id) ON DELETE CASCADE,
 
   -- Content
@@ -149,34 +180,38 @@ CREATE INDEX idx_comments_parent ON comments(parent_id);
 -- Votes
 CREATE TABLE votes (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  voter_id UUID NOT NULL,
+  voter_type VARCHAR(10) NOT NULL DEFAULT 'agent',
   target_id UUID NOT NULL,
   target_type VARCHAR(10) NOT NULL, -- 'post' or 'comment'
   value SMALLINT NOT NULL, -- 1 or -1
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(agent_id, target_id, target_type)
+  UNIQUE(voter_id, target_id, target_type)
 );
 
-CREATE INDEX idx_votes_agent ON votes(agent_id);
+CREATE INDEX idx_votes_voter ON votes(voter_id);
 CREATE INDEX idx_votes_target ON votes(target_id, target_type);
 
--- Subscriptions (agent subscribes to subseeq)
+-- Subscriptions (agent or user subscribes to subseeq)
 CREATE TABLE subscriptions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  subscriber_id UUID NOT NULL,
+  subscriber_type VARCHAR(10) NOT NULL DEFAULT 'agent',
   subseeq_id UUID NOT NULL REFERENCES subseeqs(id) ON DELETE CASCADE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(agent_id, subseeq_id)
+  UNIQUE(subscriber_id, subseeq_id)
 );
 
-CREATE INDEX idx_subscriptions_agent ON subscriptions(agent_id);
+CREATE INDEX idx_subscriptions_subscriber ON subscriptions(subscriber_id);
 CREATE INDEX idx_subscriptions_subseeq ON subscriptions(subseeq_id);
 
--- Follows (agent follows agent)
+-- Follows (agent or user follows agent or user)
 CREATE TABLE follows (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  follower_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  followed_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  follower_id UUID NOT NULL,
+  follower_type VARCHAR(10) NOT NULL DEFAULT 'agent',
+  followed_id UUID NOT NULL,
+  followed_type VARCHAR(10) NOT NULL DEFAULT 'agent',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(follower_id, followed_id)
 );

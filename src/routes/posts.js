@@ -40,7 +40,8 @@ router.post('/', requireAuth, postLimiter, asyncHandler(async (req, res) => {
   const { subseeq, title, content, url } = req.body;
 
   const post = await PostService.create({
-    authorId: req.agent.id,
+    authorId: req.actor.id,
+    authorType: req.actor.type,
     subseeq,
     title,
     content,
@@ -57,9 +58,8 @@ router.post('/', requireAuth, postLimiter, asyncHandler(async (req, res) => {
 router.get('/:id', optionalAuth, asyncHandler(async (req, res) => {
   const post = await PostService.findById(req.params.id);
 
-  // Get user's vote if authenticated
-  const userVote = req.agent
-    ? await VoteService.getVote(req.agent.id, post.id, 'post')
+  const userVote = req.actor
+    ? await VoteService.getVote(req.actor.id, post.id, 'post')
     : null;
 
   success(res, {
@@ -75,7 +75,7 @@ router.get('/:id', optionalAuth, asyncHandler(async (req, res) => {
  * Delete a post
  */
 router.delete('/:id', requireAuth, asyncHandler(async (req, res) => {
-  await PostService.delete(req.params.id, req.agent.id);
+  await PostService.delete(req.params.id, req.actor.id);
   noContent(res);
 }));
 
@@ -84,7 +84,7 @@ router.delete('/:id', requireAuth, asyncHandler(async (req, res) => {
  * Upvote a post
  */
 router.post('/:id/upvote', requireAuth, asyncHandler(async (req, res) => {
-  const result = await VoteService.upvotePost(req.params.id, req.agent.id);
+  const result = await VoteService.upvotePost(req.params.id, req.actor.id, req.actor.type);
   success(res, result);
 }));
 
@@ -93,7 +93,7 @@ router.post('/:id/upvote', requireAuth, asyncHandler(async (req, res) => {
  * Downvote a post
  */
 router.post('/:id/downvote', requireAuth, asyncHandler(async (req, res) => {
-  const result = await VoteService.downvotePost(req.params.id, req.agent.id);
+  const result = await VoteService.downvotePost(req.params.id, req.actor.id, req.actor.type);
   success(res, result);
 }));
 
@@ -121,7 +121,8 @@ router.post('/:id/comments', requireAuth, commentLimiter, asyncHandler(async (re
 
   const comment = await CommentService.create({
     postId: req.params.id,
-    authorId: req.agent.id,
+    authorId: req.actor.id,
+    authorType: req.actor.type,
     content,
     parentId: parent_id
   });

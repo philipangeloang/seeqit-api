@@ -35,13 +35,20 @@ class AgentService {
       );
     }
 
-    // Check if name exists
-    const existing = await queryOne(
+    // Check if name exists in agents or users
+    const existingAgent = await queryOne(
       'SELECT id FROM agents WHERE name = $1',
       [normalizedName]
     );
+    if (existingAgent) {
+      throw new ConflictError('Name already taken', 'Try a different name');
+    }
 
-    if (existing) {
+    const existingUser = await queryOne(
+      'SELECT id FROM users WHERE username = $1',
+      [normalizedName]
+    );
+    if (existingUser) {
       throw new ConflictError('Name already taken', 'Try a different name');
     }
 
@@ -229,12 +236,11 @@ class AgentService {
    * @param {string} followedId - Agent to follow ID
    * @returns {Promise<Object>} Result
    */
-  static async follow(followerId, followedId) {
+  static async follow(followerId, followerType, followedId, followedType) {
     if (followerId === followedId) {
       throw new BadRequestError('Cannot follow yourself');
     }
 
-    // Check if already following
     const existing = await queryOne(
       'SELECT id FROM follows WHERE follower_id = $1 AND followed_id = $2',
       [followerId, followedId]
@@ -246,17 +252,21 @@ class AgentService {
 
     await transaction(async (client) => {
       await client.query(
-        'INSERT INTO follows (follower_id, followed_id) VALUES ($1, $2)',
-        [followerId, followedId]
+        'INSERT INTO follows (follower_id, follower_type, followed_id, followed_type) VALUES ($1, $2, $3, $4)',
+        [followerId, followerType, followedId, followedType]
       );
 
+      // Update follower's following_count in the correct table
+      const followerTable = followerType === 'user' ? 'users' : 'agents';
       await client.query(
-        'UPDATE agents SET following_count = following_count + 1 WHERE id = $1',
+        `UPDATE ${followerTable} SET following_count = following_count + 1 WHERE id = $1`,
         [followerId]
       );
 
+      // Update followed's follower_count in the correct table
+      const followedTable = followedType === 'user' ? 'users' : 'agents';
       await client.query(
-        'UPDATE agents SET follower_count = follower_count + 1 WHERE id = $1',
+        `UPDATE ${followedTable} SET follower_count = follower_count + 1 WHERE id = $1`,
         [followedId]
       );
     });
@@ -265,13 +275,9 @@ class AgentService {
   }
 
   /**
-   * Unfollow an agent
-   *
-   * @param {string} followerId - Follower agent ID
-   * @param {string} followedId - Agent to unfollow ID
-   * @returns {Promise<Object>} Result
+   * Unfollow
    */
-  static async unfollow(followerId, followedId) {
+  static async unfollow(followerId, followerType, followedId, followedType) {
     const result = await queryOne(
       'DELETE FROM follows WHERE follower_id = $1 AND followed_id = $2 RETURNING id',
       [followerId, followedId]
@@ -281,13 +287,16 @@ class AgentService {
       return { success: true, action: 'not_following' };
     }
 
+    const followerTable = followerType === 'user' ? 'users' : 'agents';
+    const followedTable = followedType === 'user' ? 'users' : 'agents';
+
     await Promise.all([
       queryOne(
-        'UPDATE agents SET following_count = following_count - 1 WHERE id = $1',
+        `UPDATE ${followerTable} SET following_count = following_count - 1 WHERE id = $1`,
         [followerId]
       ),
       queryOne(
-        'UPDATE agents SET follower_count = follower_count - 1 WHERE id = $1',
+        `UPDATE ${followedTable} SET follower_count = follower_count - 1 WHERE id = $1`,
         [followedId]
       )
     ]);
@@ -297,10 +306,6 @@ class AgentService {
 
   /**
    * Check if following
-   *
-   * @param {string} followerId - Follower ID
-   * @param {string} followedId - Followed ID
-   * @returns {Promise<boolean>}
    */
   static async isFollowing(followerId, followedId) {
     const result = await queryOne(

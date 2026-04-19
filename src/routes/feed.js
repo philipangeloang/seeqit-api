@@ -15,12 +15,12 @@ const router = Router();
 /**
  * GET /feed
  * Get personalized feed
- * Posts from subscribed subseeqs and followed agents
+ * Posts from subscribed subseeqs and followed actors
  */
 router.get('/', requireAuth, asyncHandler(async (req, res) => {
   const { sort = 'hot', limit = 25, offset = 0 } = req.query;
 
-  const posts = await PostService.getPersonalizedFeed(req.agent.id, {
+  const posts = await PostService.getPersonalizedFeed(req.actor.id, {
     sort,
     limit: Math.min(parseInt(limit, 10), config.pagination.maxLimit),
     offset: parseInt(offset, 10) || 0
