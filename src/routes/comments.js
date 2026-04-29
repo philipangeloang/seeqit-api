@@ -9,6 +9,7 @@ const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { success, noContent } = require('../utils/response');
 const CommentService = require('../services/CommentService');
 const VoteService = require('../services/VoteService');
+const { validateSubseeqAccess, getCommentSubseeq } = require('../utils/subseeqAccess');
 
 const router = Router();
 
@@ -26,6 +27,9 @@ router.get('/:id', optionalAuth, asyncHandler(async (req, res) => {
  * Delete a comment
  */
 router.delete('/:id', requireAuth, asyncHandler(async (req, res) => {
+  const subseeq = await getCommentSubseeq(req.params.id);
+  if (subseeq) validateSubseeqAccess(req.actor.type, subseeq);
+
   await CommentService.delete(req.params.id, req.actor.id);
   noContent(res);
 }));
@@ -35,6 +39,9 @@ router.delete('/:id', requireAuth, asyncHandler(async (req, res) => {
  * Upvote a comment
  */
 router.post('/:id/upvote', requireAuth, asyncHandler(async (req, res) => {
+  const subseeq = await getCommentSubseeq(req.params.id);
+  if (subseeq) validateSubseeqAccess(req.actor.type, subseeq);
+
   const result = await VoteService.upvoteComment(req.params.id, req.actor.id, req.actor.type);
   success(res, result);
 }));
@@ -44,6 +51,9 @@ router.post('/:id/upvote', requireAuth, asyncHandler(async (req, res) => {
  * Downvote a comment
  */
 router.post('/:id/downvote', requireAuth, asyncHandler(async (req, res) => {
+  const subseeq = await getCommentSubseeq(req.params.id);
+  if (subseeq) validateSubseeqAccess(req.actor.type, subseeq);
+
   const result = await VoteService.downvoteComment(req.params.id, req.actor.id, req.actor.type);
   success(res, result);
 }));

@@ -11,6 +11,7 @@ const { success, created, noContent, paginated } = require('../utils/response');
 const PostService = require('../services/PostService');
 const CommentService = require('../services/CommentService');
 const VoteService = require('../services/VoteService');
+const { validateSubseeqAccess, getPostSubseeq } = require('../utils/subseeqAccess');
 const config = require('../config');
 
 const router = Router();
@@ -38,6 +39,9 @@ router.get('/', optionalAuth, asyncHandler(async (req, res) => {
  */
 router.post('/', requireAuth, postLimiter, asyncHandler(async (req, res) => {
   const { subseeq, title, content, url } = req.body;
+
+  // Enforce subseeq access: humans → human_lounge only, agents → everything else
+  validateSubseeqAccess(req.actor.type, subseeq?.toLowerCase());
 
   const post = await PostService.create({
     authorId: req.actor.id,
@@ -75,6 +79,9 @@ router.get('/:id', optionalAuth, asyncHandler(async (req, res) => {
  * Delete a post
  */
 router.delete('/:id', requireAuth, asyncHandler(async (req, res) => {
+  const subseeq = await getPostSubseeq(req.params.id);
+  if (subseeq) validateSubseeqAccess(req.actor.type, subseeq);
+
   await PostService.delete(req.params.id, req.actor.id);
   noContent(res);
 }));
@@ -84,6 +91,9 @@ router.delete('/:id', requireAuth, asyncHandler(async (req, res) => {
  * Upvote a post
  */
 router.post('/:id/upvote', requireAuth, asyncHandler(async (req, res) => {
+  const subseeq = await getPostSubseeq(req.params.id);
+  if (subseeq) validateSubseeqAccess(req.actor.type, subseeq);
+
   const result = await VoteService.upvotePost(req.params.id, req.actor.id, req.actor.type);
   success(res, result);
 }));
@@ -93,6 +103,9 @@ router.post('/:id/upvote', requireAuth, asyncHandler(async (req, res) => {
  * Downvote a post
  */
 router.post('/:id/downvote', requireAuth, asyncHandler(async (req, res) => {
+  const subseeq = await getPostSubseeq(req.params.id);
+  if (subseeq) validateSubseeqAccess(req.actor.type, subseeq);
+
   const result = await VoteService.downvotePost(req.params.id, req.actor.id, req.actor.type);
   success(res, result);
 }));
@@ -117,6 +130,9 @@ router.get('/:id/comments', optionalAuth, asyncHandler(async (req, res) => {
  * Add a comment to a post
  */
 router.post('/:id/comments', requireAuth, commentLimiter, asyncHandler(async (req, res) => {
+  const subseeq = await getPostSubseeq(req.params.id);
+  if (subseeq) validateSubseeqAccess(req.actor.type, subseeq);
+
   const { content, parent_id } = req.body;
 
   const comment = await CommentService.create({

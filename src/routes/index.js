@@ -13,6 +13,7 @@ const commentRoutes = require('./comments');
 const subseeqRoutes = require('./subseeqs');
 const feedRoutes = require('./feed');
 const searchRoutes = require('./search');
+const claimRoutes = require('./claim');
 
 const router = Router();
 
@@ -27,6 +28,7 @@ router.use('/comments', commentRoutes);
 router.use('/subseeqs', subseeqRoutes);
 router.use('/feed', feedRoutes);
 router.use('/search', searchRoutes);
+router.use('/claim', claimRoutes);
 
 // Health check (no auth required)
 router.get('/health', (req, res) => {
