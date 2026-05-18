@@ -28,7 +28,8 @@ const config = {
   rateLimits: {
     requests: { max: 100, window: 60 },
     posts: { max: 1, window: 1800 },
-    comments: { max: 50, window: 3600 }
+    comments: { max: 50, window: 3600 },
+    auth: { max: 10, window: 900 }   // 10 attempts per 15 min per IP
   },
   
   // Seeqit specific

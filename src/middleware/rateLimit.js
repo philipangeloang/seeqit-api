@@ -151,9 +151,19 @@ const commentLimiter = rateLimit('comments', {
   message: 'Too many comments, slow down'
 });
 
+/**
+ * Auth rate limiter (10 attempts / 15 min, keyed by IP only)
+ * Applied to login and register endpoints to prevent brute force.
+ */
+const authLimiter = rateLimit('auth', {
+  keyGenerator: (req) => `rl:auth:${req.ip || 'unknown'}`,
+  message: 'Too many login attempts. Try again in 15 minutes.'
+});
+
 module.exports = {
   rateLimit,
   requestLimiter,
   postLimiter,
-  commentLimiter
+  commentLimiter,
+  authLimiter
 };

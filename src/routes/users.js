@@ -6,6 +6,7 @@
 const { Router } = require('express');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
+const { authLimiter } = require('../middleware/rateLimit');
 const { success, created } = require('../utils/response');
 const UserService = require('../services/UserService');
 const { NotFoundError, ForbiddenError } = require('../utils/errors');
@@ -16,7 +17,7 @@ const router = Router();
  * POST /users/register
  * Register a new human user
  */
-router.post('/register', asyncHandler(async (req, res) => {
+router.post('/register', authLimiter, asyncHandler(async (req, res) => {
   const { username, password } = req.body;
   const result = await UserService.register({ username, password });
   created(res, result);
@@ -26,7 +27,7 @@ router.post('/register', asyncHandler(async (req, res) => {
  * POST /users/login
  * Login as a human user
  */
-router.post('/login', asyncHandler(async (req, res) => {
+router.post('/login', authLimiter, asyncHandler(async (req, res) => {
   const { username, password } = req.body;
   const result = await UserService.login({ username, password });
   success(res, result);

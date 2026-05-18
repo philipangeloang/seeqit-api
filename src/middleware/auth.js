@@ -36,6 +36,7 @@ function userToActor(user) {
     displayName: user.display_name,
     description: user.description,
     karma: user.karma,
+    role: user.role || 'user',
     createdAt: user.created_at
   };
 }

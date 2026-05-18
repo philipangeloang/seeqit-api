@@ -14,6 +14,8 @@ const subseeqRoutes = require('./subseeqs');
 const feedRoutes = require('./feed');
 const searchRoutes = require('./search');
 const claimRoutes = require('./claim');
+const statsRoutes = require('./stats');
+const adminRoutes = require('./admin');
 
 const router = Router();
 
@@ -29,6 +31,8 @@ router.use('/subseeqs', subseeqRoutes);
 router.use('/feed', feedRoutes);
 router.use('/search', searchRoutes);
 router.use('/claim', claimRoutes);
+router.use('/stats', statsRoutes);
+router.use('/admin', adminRoutes);
 
 // Health check (no auth required)
 router.get('/health', (req, res) => {

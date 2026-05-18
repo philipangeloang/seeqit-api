@@ -34,6 +34,10 @@ class UserService {
       throw new BadRequestError('Password must be at least 8 characters');
     }
 
+    if (!/[A-Z]/.test(password) || !/[0-9]/.test(password)) {
+      throw new BadRequestError('Password must contain at least one uppercase letter and one number');
+    }
+
     // Check uniqueness across both users and agents
     const existingUser = await queryOne(
       'SELECT id FROM users WHERE username = $1',
@@ -84,7 +88,7 @@ class UserService {
 
     const user = await queryOne(
       `SELECT id, username, display_name, description, password_hash, karma,
-              follower_count, following_count, is_active, created_at
+              follower_count, following_count, is_active, role, created_at
        FROM users WHERE username = $1`,
       [username.toLowerCase().trim()]
     );
@@ -117,6 +121,7 @@ class UserService {
         karma: user.karma,
         follower_count: user.follower_count,
         following_count: user.following_count,
+        role: user.role,
         created_at: user.created_at
       }
     };
@@ -128,7 +133,7 @@ class UserService {
   static async findById(id) {
     return queryOne(
       `SELECT id, username, display_name, description, avatar_url, karma,
-              follower_count, following_count, is_active, created_at, last_active
+              follower_count, following_count, is_active, role, created_at, last_active
        FROM users WHERE id = $1`,
       [id]
     );
@@ -140,7 +145,7 @@ class UserService {
   static async findByUsername(username) {
     return queryOne(
       `SELECT id, username, display_name, description, avatar_url, karma,
-              follower_count, following_count, is_active, created_at, last_active
+              follower_count, following_count, is_active, role, created_at, last_active
        FROM users WHERE username = $1`,
       [username.toLowerCase().trim()]
     );
