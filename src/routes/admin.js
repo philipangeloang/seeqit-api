@@ -9,7 +9,7 @@ const { requireAuth } = require('../middleware/auth');
 const { requireAdmin } = require('../middleware/admin');
 const { queryOne, queryAll } = require('../config/database');
 const { success } = require('../utils/response');
-const { NotFoundError } = require('../utils/errors');
+const { NotFoundError, ForbiddenError } = require('../utils/errors');
 
 const router = Router();
 
@@ -20,6 +20,21 @@ router.use(requireAuth, requireAdmin);
  * Extended platform statistics for the admin dashboard.
  */
 router.get('/stats', asyncHandler(async (req, res) => {
+  const { from, to } = req.query;
+  const parseDate = (value) => {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  };
+
+  const rangeEnd = parseDate(to) || new Date();
+  const defaultStart = new Date(rangeEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const rangeStart = parseDate(from) || defaultStart;
+
+  const [start, end] = rangeStart <= rangeEnd
+    ? [rangeStart, rangeEnd]
+    : [rangeEnd, rangeStart];
+
   const [overview, newRegistrations, topAgents, activeSubseeqs] = await Promise.all([
     queryOne(`
       SELECT
@@ -29,10 +44,10 @@ router.get('/stats', asyncHandler(async (req, res) => {
         (SELECT COUNT(*) FROM subseeqs)::int                         AS total_subseeqs,
         (SELECT COUNT(*) FROM comments WHERE is_deleted = false)::int AS total_comments,
         (SELECT COUNT(*) FROM votes)::int                            AS total_votes,
-        (SELECT COUNT(*) FROM users  WHERE created_at >= NOW() - INTERVAL '7 days')::int AS new_users_7d,
-        (SELECT COUNT(*) FROM agents WHERE created_at >= NOW() - INTERVAL '7 days')::int AS new_agents_7d,
-        (SELECT COUNT(*) FROM posts  WHERE created_at >= NOW() - INTERVAL '7 days' AND is_deleted = false)::int AS new_posts_7d
-    `),
+        (SELECT COUNT(*) FROM users  WHERE created_at >= $1 AND created_at <= $2)::int AS new_users_range,
+        (SELECT COUNT(*) FROM agents WHERE created_at >= $1 AND created_at <= $2)::int AS new_agents_range,
+        (SELECT COUNT(*) FROM posts  WHERE created_at >= $1 AND created_at <= $2 AND is_deleted = false)::int AS new_posts_range
+    `, [start, end]),
     queryAll(`
       SELECT DATE(created_at) AS day, COUNT(*)::int AS count
       FROM users
@@ -46,8 +61,11 @@ router.get('/stats', asyncHandler(async (req, res) => {
       LIMIT 10
     `),
     queryAll(`
-      SELECT name, display_name, post_count, subscriber_count
-      FROM subseeqs
+      SELECT s.name, s.display_name, s.subscriber_count,
+             COUNT(p.id)::int AS post_count
+      FROM subseeqs s
+      LEFT JOIN posts p ON p.subseeq_id = s.id AND p.is_deleted = false
+      GROUP BY s.id, s.name, s.display_name, s.subscriber_count
       ORDER BY post_count DESC
       LIMIT 10
     `)
@@ -55,6 +73,7 @@ router.get('/stats', asyncHandler(async (req, res) => {
 
   success(res, {
     overview,
+    range: { from: start.toISOString(), to: end.toISOString() },
     newRegistrations,
     topAgents,
     activeSubseeqs
@@ -66,7 +85,7 @@ router.get('/stats', asyncHandler(async (req, res) => {
  * Paginated user list with optional search and status filter.
  */
 router.get('/users', asyncHandler(async (req, res) => {
-  const { search = '', status = 'all', sort = 'new', limit = 50, offset = 0 } = req.query;
+  const { search = '', status = 'all', role = 'all', sort = 'joined', order = 'desc', limit = 50, offset = 0 } = req.query;
   const lim = Math.min(parseInt(limit, 10) || 50, 200);
   const off = parseInt(offset, 10) || 0;
 
@@ -81,25 +100,47 @@ router.get('/users', asyncHandler(async (req, res) => {
   }
   if (status === 'active')   { whereParts.push(`is_active = true`); }
   if (status === 'inactive') { whereParts.push(`is_active = false`); }
+  if (role && role !== 'all') {
+    whereParts.push(`role = $${idx}`);
+    params.push(role);
+    idx++;
+  }
 
   const where = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
-  const orderBy = sort === 'karma' ? 'karma DESC, created_at DESC' : 'created_at DESC';
+  const orderDir = order === 'asc' ? 'ASC' : 'DESC';
+  const sortMap = {
+    username: 'username',
+    karma: 'karma',
+    joined: 'created_at',
+    last_active: 'last_active'
+  };
+  const sortKey = sortMap[sort] || 'created_at';
+  const orderBy = sortKey === 'last_active'
+    ? `last_active ${orderDir} NULLS LAST, created_at DESC`
+    : `${sortKey} ${orderDir}, created_at DESC`;
+
+  const statsParams = params.slice();
 
   params.push(lim, off);
 
-  const [users, total] = await Promise.all([
+  const [users, stats] = await Promise.all([
     queryAll(
       `SELECT id, username, display_name, karma, role, is_active, created_at, last_active
        FROM users ${where} ORDER BY ${orderBy} LIMIT $${idx} OFFSET $${idx + 1}`,
       params
     ),
     queryOne(
-      `SELECT COUNT(*)::int AS count FROM users ${where}`,
-      params.slice(0, idx - 1)
+      `SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE is_active = true)::int AS active,
+        COUNT(*) FILTER (WHERE is_active = false)::int AS inactive,
+        COUNT(*) FILTER (WHERE role = 'admin')::int AS admins
+       FROM users ${where}`,
+      statsParams
     )
   ]);
 
-  success(res, { users, total: total.count, limit: lim, offset: off });
+  success(res, { users, total: stats.total, limit: lim, offset: off, stats });
 }));
 
 /**
@@ -131,7 +172,7 @@ router.patch('/users/:id/status', asyncHandler(async (req, res) => {
  * Paginated agent list.
  */
 router.get('/agents', asyncHandler(async (req, res) => {
-  const { search = '', status = 'all', sort = 'new', limit = 50, offset = 0 } = req.query;
+  const { search = '', status = 'all', claimed = 'all', sort = 'joined', order = 'desc', limit = 50, offset = 0 } = req.query;
   const lim = Math.min(parseInt(limit, 10) || 50, 200);
   const off = parseInt(offset, 10) || 0;
 
@@ -146,25 +187,46 @@ router.get('/agents', asyncHandler(async (req, res) => {
   }
   if (status === 'active')   { whereParts.push(`is_active = true`); }
   if (status === 'inactive') { whereParts.push(`is_active = false`); }
+  if (claimed === 'claimed')   { whereParts.push(`is_claimed = true`); }
+  if (claimed === 'unclaimed') { whereParts.push(`is_claimed = false`); }
 
   const where = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
-  const orderBy = sort === 'karma' ? 'karma DESC, created_at DESC' : 'created_at DESC';
+  const orderDir = order === 'asc' ? 'ASC' : 'DESC';
+  const sortMap = {
+    name: 'name',
+    karma: 'karma',
+    joined: 'created_at',
+    last_active: 'last_active',
+    status: 'status'
+  };
+  const sortKey = sortMap[sort] || 'created_at';
+  const orderBy = sortKey === 'last_active'
+    ? `last_active ${orderDir} NULLS LAST, created_at DESC`
+    : `${sortKey} ${orderDir}, created_at DESC`;
+
+  const statsParams = params.slice();
 
   params.push(lim, off);
 
-  const [agents, total] = await Promise.all([
+  const [agents, stats] = await Promise.all([
     queryAll(
       `SELECT id, name, display_name, karma, status, is_claimed, is_active, created_at, last_active
        FROM agents ${where} ORDER BY ${orderBy} LIMIT $${idx} OFFSET $${idx + 1}`,
       params
     ),
     queryOne(
-      `SELECT COUNT(*)::int AS count FROM agents ${where}`,
-      params.slice(0, idx - 1)
+      `SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE is_active = true)::int AS active,
+        COUNT(*) FILTER (WHERE is_active = false)::int AS inactive,
+        COUNT(*) FILTER (WHERE is_claimed = true)::int AS claimed,
+        COUNT(*) FILTER (WHERE is_claimed = false)::int AS unclaimed
+       FROM agents ${where}`,
+      statsParams
     )
   ]);
 
-  success(res, { agents, total: total.count, limit: lim, offset: off });
+  success(res, { agents, total: stats.total, limit: lim, offset: off, stats });
 }));
 
 /**
@@ -196,7 +258,7 @@ router.patch('/agents/:id/status', asyncHandler(async (req, res) => {
  * All posts (including soft-deleted) with author and subseeq info.
  */
 router.get('/posts', asyncHandler(async (req, res) => {
-  const { search = '', subseeq = '', sort = 'new', limit = 50, offset = 0 } = req.query;
+  const { search = '', subseeq = '', deleted = 'all', sort = 'date', order = 'desc', limit = 50, offset = 0 } = req.query;
   const lim = Math.min(parseInt(limit, 10) || 50, 200);
   const off = parseInt(offset, 10) || 0;
 
@@ -211,23 +273,41 @@ router.get('/posts', asyncHandler(async (req, res) => {
   }
   if (subseeq) {
     whereParts.push(`p.subseeq = $${idx}`);
-    params.push(subseeq);
+    params.push(String(subseeq).toLowerCase());
     idx++;
+  }
+  if (deleted === 'active') {
+    whereParts.push(`p.is_deleted = false`);
+  }
+  if (deleted === 'deleted') {
+    whereParts.push(`p.is_deleted = true`);
   }
 
   const where = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
-  const orderBy = sort === 'score' ? 'p.score DESC' : 'p.created_at DESC';
+  const orderDir = order === 'asc' ? 'ASC' : 'DESC';
+  const sortMap = {
+    score: 'p.score',
+    date: 'p.created_at',
+    comments: 'p.comment_count'
+  };
+  const sortKey = sortMap[sort] || 'p.created_at';
+  const orderBy = `${sortKey} ${orderDir}, p.created_at DESC`;
+
+  const statsParams = params.slice();
 
   params.push(lim, off);
 
-  const [posts, total] = await Promise.all([
+  const [posts, stats] = await Promise.all([
     queryAll(
       `SELECT p.id, p.title, p.subseeq, p.score, p.comment_count,
               p.is_deleted, p.author_type, p.created_at,
-              CASE p.author_type
-                WHEN 'agent' THEN (SELECT name FROM agents WHERE id = p.author_id)
-                ELSE              (SELECT username FROM users WHERE id = p.author_id)
-              END AS author_name
+              COALESCE(
+                CASE p.author_type
+                  WHEN 'agent' THEN (SELECT name FROM agents WHERE id = p.author_id)
+                  ELSE              (SELECT username FROM users WHERE id = p.author_id)
+                END,
+                'Deleted'
+              ) AS author_name
        FROM posts p
        ${where}
        ORDER BY ${orderBy}
@@ -235,12 +315,17 @@ router.get('/posts', asyncHandler(async (req, res) => {
       params
     ),
     queryOne(
-      `SELECT COUNT(*)::int AS count FROM posts p ${where}`,
-      params.slice(0, idx - 1)
+      `SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE p.is_deleted = false)::int AS active,
+        COUNT(*) FILTER (WHERE p.is_deleted = true)::int AS deleted,
+        COUNT(*) FILTER (WHERE p.created_at >= NOW() - INTERVAL '7 days')::int AS last_7d
+       FROM posts p ${where}`,
+      statsParams
     )
   ]);
 
-  success(res, { posts, total: total.count, limit: lim, offset: off });
+  success(res, { posts, total: stats.total, limit: lim, offset: off, stats });
 }));
 
 /**
@@ -248,16 +333,7 @@ router.get('/posts', asyncHandler(async (req, res) => {
  * Hard-delete a post.
  */
 router.delete('/posts/:id', asyncHandler(async (req, res) => {
-  const { id } = req.params;
-
-  const post = await queryOne(
-    'DELETE FROM posts WHERE id = $1 RETURNING id, title',
-    [id]
-  );
-
-  if (!post) throw new NotFoundError('Post');
-
-  success(res, { deleted: post });
+  throw new ForbiddenError('Admin post deletion is disabled.');
 }));
 
 module.exports = router;

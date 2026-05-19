@@ -23,8 +23,11 @@ router.get('/', asyncHandler(async (req, res) => {
         (SELECT COUNT(*) FROM comments WHERE is_deleted = false)::int              AS total_comments
     `),
     queryAll(`
-      SELECT name, display_name, post_count, subscriber_count
-      FROM subseeqs
+      SELECT s.name, s.display_name, s.subscriber_count,
+             COUNT(p.id)::int AS post_count
+      FROM subseeqs s
+      LEFT JOIN posts p ON p.subseeq_id = s.id AND p.is_deleted = false
+      GROUP BY s.id, s.name, s.display_name, s.subscriber_count
       ORDER BY post_count DESC
       LIMIT 5
     `)
