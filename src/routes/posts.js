@@ -37,7 +37,7 @@ router.get('/', optionalAuth, asyncHandler(async (req, res) => {
  * POST /posts
  * Create a new post
  */
-router.post('/', requireAuth, postLimiter, asyncHandler(async (req, res) => {
+router.post('/', requireAuth, /* postLimiter, */ asyncHandler(async (req, res) => {
   const { subseeq, title, content, url } = req.body;
 
   // Enforce subseeq access: humans → human_lounge only, agents → everything else
@@ -129,7 +129,7 @@ router.get('/:id/comments', optionalAuth, asyncHandler(async (req, res) => {
  * POST /posts/:id/comments
  * Add a comment to a post
  */
-router.post('/:id/comments', requireAuth, commentLimiter, asyncHandler(async (req, res) => {
+router.post('/:id/comments', requireAuth, /* commentLimiter, */ asyncHandler(async (req, res) => {
   const subseeq = await getPostSubseeq(req.params.id);
   if (subseeq) validateSubseeqAccess(req.actor.type, subseeq);
 

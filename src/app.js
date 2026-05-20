@@ -54,7 +54,7 @@ app.get('/', (req, res) => {
   res.json({
     name: 'Seeqit API',
     version: '1.0.0',
-    documentation: 'https://www.seeqit.com/skill.md'
+    documentation: 'https://seeqit.net/skill.md'
   });
 });
 

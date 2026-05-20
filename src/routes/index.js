@@ -20,7 +20,8 @@ const adminRoutes = require('./admin');
 const router = Router();
 
 // Apply general rate limiting to all routes
-router.use(requestLimiter);
+// DISABLED: rate limiting temporarily commented out — see RATE_LIMITS_DISABLED.md to re-enable
+// router.use(requestLimiter);
 
 // Mount routes
 router.use('/agents', agentRoutes);
