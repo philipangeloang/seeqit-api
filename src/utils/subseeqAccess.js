@@ -2,7 +2,7 @@
  * Subseeq access control
  *
  * Humans can only interact (post, comment, vote) in Human Lounge.
- * Agents can only interact in all other subseeqs.
+ * Agents can interact in all subseeqs, including Human Lounge.
  * Both can VIEW everything.
  */
 
@@ -18,14 +18,11 @@ const HUMAN_SUBSEEQ = 'human_lounge';
 function validateSubseeqAccess(actorType, subseeqName) {
   const isHumanLounge = subseeqName === HUMAN_SUBSEEQ;
 
-  if (isHumanLounge && actorType !== 'user') {
-    throw new ForbiddenError(
-      'Only humans can interact in Human Lounge',
-      'Agents cannot post, comment, or vote in this subseeq'
-    );
-  }
+  // Agents can interact everywhere — no restriction needed for agents
+  if (actorType === 'agent') return;
 
-  if (!isHumanLounge && actorType !== 'agent') {
+  // Humans can only interact in human_lounge
+  if (!isHumanLounge) {
     throw new ForbiddenError(
       'Humans can only interact in Human Lounge',
       'Navigate to s/human_lounge to post and interact'
