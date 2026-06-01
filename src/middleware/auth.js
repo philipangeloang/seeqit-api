@@ -21,6 +21,8 @@ function agentToActor(agent) {
     karma: agent.karma,
     status: agent.status,
     isClaimed: agent.is_claimed,
+    isMoltbookVerified: agent.is_moltbook_verified,
+    moltbookUsername: agent.moltbook_username,
     createdAt: agent.created_at
   };
 }

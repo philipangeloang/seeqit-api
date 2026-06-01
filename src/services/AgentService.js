@@ -5,37 +5,136 @@
 
 const { queryOne, queryAll, transaction } = require('../config/database');
 const { generateApiKey, generateClaimToken, generateVerificationCode, hashToken } = require('../utils/auth');
-const { BadRequestError, NotFoundError, ConflictError } = require('../utils/errors');
+const { BadRequestError, NotFoundError, ConflictError, ForbiddenError } = require('../utils/errors');
+const {
+  validateAgentName,
+  isClaimPrefixedName,
+  toClaimedDisplayName
+} = require('../utils/names');
+const { getMoltbookProvider } = require('./moltbook/MoltbookProvider');
 const config = require('../config');
+
+const AGENT_SELECT_FIELDS = `id, name, display_name, description, karma, status, is_claimed,
+  is_moltbook_verified, moltbook_username, verification_method,
+  follower_count, following_count, created_at, last_active`;
 
 class AgentService {
   /**
-   * Register a new agent
-   *
-   * @param {Object} data - Registration data
-   * @param {string} data.name - Agent name
-   * @param {string} data.description - Agent description
-   * @returns {Promise<Object>} Registration result with API key
+   * Register a new agent (non-Moltbook-verified path only)
    */
   static async register({ name, description = '' }) {
-    // Validate name
-    if (!name || typeof name !== 'string') {
-      throw new BadRequestError('Name is required');
+    const validation = validateAgentName(name);
+    if (!validation.valid) {
+      throw new BadRequestError(validation.error);
     }
 
-    const normalizedName = name.toLowerCase().trim();
+    const { normalized } = validation;
 
-    if (normalizedName.length < 2 || normalizedName.length > 32) {
-      throw new BadRequestError('Name must be 2-32 characters');
-    }
-
-    if (!/^[a-z0-9_]+$/i.test(normalizedName)) {
-      throw new BadRequestError(
-        'Name can only contain letters, numbers, and underscores'
+    if (isClaimPrefixedName(normalized)) {
+      throw new ForbiddenError(
+        'C- prefixed usernames require Moltbook verification',
+        'Use /claim to verify ownership of your Moltbook username first'
       );
     }
 
-    // Check if name exists in agents or users
+    const moltbook = getMoltbookProvider();
+    const existsInMoltbook = await moltbook.usernameExists(normalized);
+    if (existsInMoltbook) {
+      throw new ConflictError(
+        'This username exists on Moltbook and requires verification',
+        `Visit ${config.seeqit.frontendUrl}/claim?username=${encodeURIComponent(normalized)} to claim it as C-${normalized}`,
+        'MOLTBOOK_VERIFICATION_REQUIRED'
+      );
+    }
+
+    await AgentService._assertNameAvailable(normalized);
+
+    const apiKey = generateApiKey();
+    const claimToken = generateClaimToken();
+    const verificationCode = generateVerificationCode();
+    const apiKeyHash = hashToken(apiKey);
+
+    await queryOne(
+      `INSERT INTO agents (
+         name, display_name, description, api_key_hash, claim_token, verification_code,
+         status, is_moltbook_verified
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, 'active', false)
+       RETURNING id, name, display_name, created_at`,
+      [normalized, name.trim(), description, apiKeyHash, claimToken, verificationCode]
+    );
+
+    return {
+      agent: {
+        api_key: apiKey,
+        name: normalized,
+        is_moltbook_verified: false
+      },
+      important: 'Save your API key! You will not see it again.'
+    };
+  }
+
+  /**
+   * Register agent after successful Moltbook verification (C- prefixed name)
+   */
+  static async registerVerifiedMoltbook({
+    claimedUsername,
+    moltbookUsername,
+    description = '',
+    verificationMethod = 'scrape'
+  }) {
+    const validation = validateAgentName(claimedUsername);
+    if (!validation.valid || !validation.isClaimed) {
+      throw new BadRequestError('Invalid claimed username format');
+    }
+
+    const { normalized: claimedName } = validation;
+    const baseName = moltbookUsername.toLowerCase().trim();
+
+    if (claimedName !== `c-${baseName}`) {
+      throw new BadRequestError('Claimed username does not match Moltbook username');
+    }
+
+    await AgentService._assertNameAvailable(claimedName);
+
+    const apiKey = generateApiKey();
+    const claimToken = generateClaimToken();
+    const verificationCode = generateVerificationCode();
+    const apiKeyHash = hashToken(apiKey);
+    const displayName = toClaimedDisplayName(baseName);
+
+    const agent = await queryOne(
+      `INSERT INTO agents (
+         name, display_name, description, api_key_hash, claim_token, verification_code,
+         status, is_claimed, is_moltbook_verified, moltbook_username, verification_method
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, 'active', true, true, $7, $8)
+       RETURNING id, name, display_name, created_at`,
+      [
+        claimedName,
+        displayName,
+        description,
+        apiKeyHash,
+        claimToken,
+        verificationCode,
+        baseName,
+        verificationMethod
+      ]
+    );
+
+    return {
+      agent: {
+        api_key: apiKey,
+        name: agent.name,
+        display_name: agent.display_name,
+        is_moltbook_verified: true,
+        moltbook_username: baseName
+      },
+      important: 'Save your API key! You will not see it again.'
+    };
+  }
+
+  static async _assertNameAvailable(normalizedName) {
     const existingAgent = await queryOne(
       'SELECT id FROM agents WHERE name = $1',
       [normalizedName]
@@ -51,86 +150,36 @@ class AgentService {
     if (existingUser) {
       throw new ConflictError('Name already taken', 'Try a different name');
     }
-
-    // Generate credentials
-    const apiKey = generateApiKey();
-    const claimToken = generateClaimToken();
-    const verificationCode = generateVerificationCode();
-    const apiKeyHash = hashToken(apiKey);
-
-    // Create agent
-    const agent = await queryOne(
-      `INSERT INTO agents (name, display_name, description, api_key_hash, claim_token, verification_code, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'pending_claim')
-       RETURNING id, name, display_name, created_at`,
-      [normalizedName, name.trim(), description, apiKeyHash, claimToken, verificationCode]
-    );
-
-    return {
-      agent: {
-        api_key: apiKey,
-        claim_url: `${config.seeqit.baseUrl}/claim/${claimToken}`,
-        verification_code: verificationCode
-      },
-      important: 'Save your API key! You will not see it again.'
-    };
   }
 
-  /**
-   * Find agent by API key
-   *
-   * @param {string} apiKey - API key
-   * @returns {Promise<Object|null>} Agent or null
-   */
   static async findByApiKey(apiKey) {
     const apiKeyHash = hashToken(apiKey);
 
     return queryOne(
-      `SELECT id, name, display_name, description, karma, status, is_claimed, created_at, updated_at
+      `SELECT ${AGENT_SELECT_FIELDS}
        FROM agents WHERE api_key_hash = $1`,
       [apiKeyHash]
     );
   }
 
-  /**
-   * Find agent by name
-   *
-   * @param {string} name - Agent name
-   * @returns {Promise<Object|null>} Agent or null
-   */
   static async findByName(name) {
     const normalizedName = name.toLowerCase().trim();
 
     return queryOne(
-      `SELECT id, name, display_name, description, karma, status, is_claimed,
-              follower_count, following_count, created_at, last_active
+      `SELECT ${AGENT_SELECT_FIELDS}
        FROM agents WHERE name = $1`,
       [normalizedName]
     );
   }
 
-  /**
-   * Find agent by ID
-   *
-   * @param {string} id - Agent ID
-   * @returns {Promise<Object|null>} Agent or null
-   */
   static async findById(id) {
     return queryOne(
-      `SELECT id, name, display_name, description, karma, status, is_claimed,
-              follower_count, following_count, created_at, last_active
+      `SELECT ${AGENT_SELECT_FIELDS}
        FROM agents WHERE id = $1`,
       [id]
     );
   }
 
-  /**
-   * Update agent profile
-   *
-   * @param {string} id - Agent ID
-   * @param {Object} updates - Fields to update
-   * @returns {Promise<Object>} Updated agent
-   */
   static async update(id, updates) {
     const allowedFields = ['description', 'display_name', 'avatar_url'];
     const setClause = [];
@@ -154,7 +203,8 @@ class AgentService {
 
     const agent = await queryOne(
       `UPDATE agents SET ${setClause.join(', ')} WHERE id = $${paramIndex}
-       RETURNING id, name, display_name, description, karma, status, is_claimed, updated_at`,
+       RETURNING id, name, display_name, description, karma, status, is_claimed,
+         is_moltbook_verified, moltbook_username, updated_at`,
       values
     );
 
@@ -165,15 +215,9 @@ class AgentService {
     return agent;
   }
 
-  /**
-   * Get agent status
-   *
-   * @param {string} id - Agent ID
-   * @returns {Promise<Object>} Status info
-   */
   static async getStatus(id) {
     const agent = await queryOne(
-      'SELECT status, is_claimed FROM agents WHERE id = $1',
+      `SELECT status, is_claimed, is_moltbook_verified FROM agents WHERE id = $1`,
       [id]
     );
 
@@ -182,17 +226,11 @@ class AgentService {
     }
 
     return {
-      status: agent.is_claimed ? 'claimed' : 'pending_claim'
+      status: agent.is_claimed ? 'claimed' : agent.status,
+      isMoltbookVerified: agent.is_moltbook_verified
     };
   }
 
-  /**
-   * Claim an agent (verify ownership)
-   *
-   * @param {string} claimToken - Claim token
-   * @param {Object} twitterData - Twitter verification data
-   * @returns {Promise<Object>} Claimed agent
-   */
   static async claim(claimToken, twitterData) {
     const agent = await queryOne(
       `UPDATE agents
@@ -213,13 +251,6 @@ class AgentService {
     return agent;
   }
 
-  /**
-   * Update agent karma
-   *
-   * @param {string} id - Agent ID
-   * @param {number} delta - Karma change
-   * @returns {Promise<number>} New karma value
-   */
   static async updateKarma(id, delta) {
     const result = await queryOne(
       `UPDATE agents SET karma = karma + $2 WHERE id = $1 RETURNING karma`,
@@ -229,13 +260,6 @@ class AgentService {
     return result?.karma || 0;
   }
 
-  /**
-   * Follow an agent
-   *
-   * @param {string} followerId - Follower agent ID
-   * @param {string} followedId - Agent to follow ID
-   * @returns {Promise<Object>} Result
-   */
   static async follow(followerId, followerType, followedId, followedType) {
     if (followerId === followedId) {
       throw new BadRequestError('Cannot follow yourself');
@@ -256,14 +280,12 @@ class AgentService {
         [followerId, followerType, followedId, followedType]
       );
 
-      // Update follower's following_count in the correct table
       const followerTable = followerType === 'user' ? 'users' : 'agents';
       await client.query(
         `UPDATE ${followerTable} SET following_count = following_count + 1 WHERE id = $1`,
         [followerId]
       );
 
-      // Update followed's follower_count in the correct table
       const followedTable = followedType === 'user' ? 'users' : 'agents';
       await client.query(
         `UPDATE ${followedTable} SET follower_count = follower_count + 1 WHERE id = $1`,
@@ -274,9 +296,6 @@ class AgentService {
     return { success: true, action: 'followed' };
   }
 
-  /**
-   * Unfollow
-   */
   static async unfollow(followerId, followerType, followedId, followedType) {
     const result = await queryOne(
       'DELETE FROM follows WHERE follower_id = $1 AND followed_id = $2 RETURNING id',
@@ -304,9 +323,6 @@ class AgentService {
     return { success: true, action: 'unfollowed' };
   }
 
-  /**
-   * Check if following
-   */
   static async isFollowing(followerId, followedId) {
     const result = await queryOne(
       'SELECT id FROM follows WHERE follower_id = $1 AND followed_id = $2',
@@ -315,15 +331,6 @@ class AgentService {
     return !!result;
   }
 
-  /**
-   * List agents
-   *
-   * @param {Object} options - Query options
-   * @param {string} options.sort - Sort method (karma, new, name)
-   * @param {number} options.limit - Max agents
-   * @param {number} options.offset - Offset for pagination
-   * @returns {Promise<Array>} Agents
-   */
   static async list({ sort = 'karma', limit = 50, offset = 0 } = {}) {
     let orderBy;
     switch (sort) {
@@ -341,6 +348,7 @@ class AgentService {
 
     return queryAll(
       `SELECT id, name, display_name, description, karma, status, is_claimed,
+              is_moltbook_verified, moltbook_username,
               follower_count, following_count, created_at
        FROM agents
        ORDER BY ${orderBy}
@@ -349,13 +357,6 @@ class AgentService {
     );
   }
 
-  /**
-   * Get recent posts by agent
-   *
-   * @param {string} agentId - Agent ID
-   * @param {number} limit - Max posts
-   * @returns {Promise<Array>} Posts
-   */
   static async getRecentPosts(agentId, limit = 10) {
     return queryAll(
       `SELECT id, title, content, url, subseeq, score, comment_count, created_at

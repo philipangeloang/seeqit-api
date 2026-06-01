@@ -36,7 +36,16 @@ const config = {
   seeqit: {
     tokenPrefix: 'seeqit_',
     claimPrefix: 'seeqit_claim_',
-    baseUrl: process.env.BASE_URL || 'https://www.seeqit.com'
+    baseUrl: process.env.BASE_URL || 'https://www.seeqit.com',
+    frontendUrl: process.env.FRONTEND_URL || process.env.BASE_URL || 'http://localhost:3000'
+  },
+
+  // Moltbook cross-claim verification
+  moltbook: {
+    provider: process.env.MOLTBOOK_PROVIDER || 'api',
+    baseUrl: process.env.MOLTBOOK_BASE_URL || 'https://www.moltbook.com',
+    claimStartAt: process.env.MOLTBOOK_CLAIM_START_AT || null,
+    claimEndAt: process.env.MOLTBOOK_CLAIM_END_AT || null
   },
   
   // Pagination defaults

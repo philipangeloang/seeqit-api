@@ -155,6 +155,88 @@ describe('Config', () => {
     const config = require('../src/config');
     assert(config.port, 'Should have port');
     assert(config.seeqit.tokenPrefix, 'Should have token prefix');
+    assert(config.moltbook, 'Should have moltbook config');
+    assert(config.seeqit.frontendUrl, 'Should have frontend URL');
+  });
+});
+
+describe('Name Utils', () => {
+  const names = require('../src/utils/names');
+
+  test('normalizeAgentName lowercases and trims', () => {
+    assertEqual(names.normalizeAgentName('  WhiteKnight  '), 'whiteknight');
+  });
+
+  test('isClaimPrefixedName detects c- prefix', () => {
+    assert(names.isClaimPrefixedName('c-whiteknight'));
+    assert(!names.isClaimPrefixedName('whiteknight'));
+  });
+
+  test('toClaimedUsername adds c- prefix', () => {
+    assertEqual(names.toClaimedUsername('whiteknight'), 'c-whiteknight');
+  });
+
+  test('extractBaseFromClaimed strips prefix', () => {
+    assertEqual(names.extractBaseFromClaimed('c-whiteknight'), 'whiteknight');
+  });
+
+  test('validateAgentName accepts hyphens in plain names', () => {
+    const result = names.validateAgentName('neo-konsi');
+    assert(result.valid);
+    assert(!result.isClaimed);
+  });
+
+  test('validateAgentName marks c- prefixed names as claimed-only', () => {
+    const result = names.validateAgentName('c-my-agent');
+    assert(result.valid);
+    assert(result.isClaimed);
+  });
+
+  test('validateAgentName rejects plain invalid chars', () => {
+    const result = names.validateAgentName('bad name');
+    assert(!result.valid);
+  });
+
+  test('validateAgentName accepts claimed name format with hyphens', () => {
+    const result = names.validateAgentName('c-white-knight');
+    assert(result.valid);
+    assert(result.isClaimed);
+  });
+
+  test('validateAgentName rejects c- without base', () => {
+    const result = names.validateAgentName('c-');
+    assert(!result.valid);
+  });
+});
+
+describe('Moltbook Provider (mock)', () => {
+  test('mock provider detects known usernames', async () => {
+    process.env.MOLTBOOK_PROVIDER = 'mock';
+    const { resetMoltbookProvider, getMoltbookProvider } = require('../src/services/moltbook/MoltbookProvider');
+    resetMoltbookProvider();
+    const provider = getMoltbookProvider();
+    assert(await provider.usernameExists('karina'));
+    assert(!(await provider.usernameExists('totally_unique_xyz_agent')));
+  });
+});
+
+describe('Moltbook Provider (api)', () => {
+  test('api provider detects real Moltbook username', async () => {
+    process.env.MOLTBOOK_PROVIDER = 'api';
+    const { resetMoltbookProvider, getMoltbookProvider } = require('../src/services/moltbook/MoltbookProvider');
+    resetMoltbookProvider();
+    const provider = getMoltbookProvider();
+    assert(await provider.usernameExists('neo_konsi_s2bw'));
+    assert(!(await provider.usernameExists('this_user_definitely_does_not_exist_xyz123')));
+  });
+});
+
+describe('Error Classes', () => {
+  test('ConflictError supports custom code', () => {
+    const { ConflictError } = require('../src/utils/errors');
+    const error = new ConflictError('Taken', 'Try another', 'MOLTBOOK_VERIFICATION_REQUIRED');
+    assertEqual(error.statusCode, 409);
+    assertEqual(error.code, 'MOLTBOOK_VERIFICATION_REQUIRED');
   });
 });
 

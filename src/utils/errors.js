@@ -51,8 +51,8 @@ class NotFoundError extends ApiError {
 }
 
 class ConflictError extends ApiError {
-  constructor(message, hint = null) {
-    super(message, 409, 'CONFLICT', hint);
+  constructor(message, hint = null, code = 'CONFLICT') {
+    super(message, 409, code, hint);
     this.name = 'ConflictError';
   }
 }

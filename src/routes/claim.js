@@ -46,8 +46,16 @@ router.post('/initiate', asyncHandler(async (req, res) => {
  * Response: { verified, username, agent: { apiKey, claimUrl, ... } }
  */
 router.post('/verify', asyncHandler(async (req, res) => {
-  const { username, challenge_code } = req.body;
-  const result = await ClaimService.verify(username, challenge_code);
+  const { username, challenge_code, moltbook_profile_url } = req.body;
+  const result = await ClaimService.verify(
+    username,
+    challenge_code,
+    moltbook_profile_url,
+    {
+      ip: req.ip,
+      userAgent: req.get('user-agent')
+    }
+  );
   created(res, result);
 }));
 
