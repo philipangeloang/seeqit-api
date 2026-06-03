@@ -47,9 +47,43 @@ function profileUrlCandidates(username) {
   return [`${base}/u/${encoded}`];
 }
 
+function normalizeMoltbookProfileUrl(input, fallbackUsername) {
+  if (!input || typeof input !== 'string') return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  if (trimmed.includes('moltbook.com')) {
+    return trimmed.startsWith('//') ? `https:${trimmed}` : `https://${trimmed}`;
+  }
+
+  const bare = trimmed
+    .replace(/^@/, '')
+    .replace(/^u\//, '')
+    .replace(/^\/+/, '')
+    .toLowerCase();
+
+  if (bare.includes('/')) {
+    return `https://www.moltbook.com/${bare}`;
+  }
+
+  const username = bare || (fallbackUsername || '').toLowerCase().trim();
+  if (!username) return null;
+
+  return `https://www.moltbook.com/u/${encodeURIComponent(username)}`;
+}
+
 function extractUsernameFromProfileUrl(profileUrl) {
+  const normalized = normalizeMoltbookProfileUrl(profileUrl);
+  if (!normalized) {
+    const bare = (profileUrl || '').trim().replace(/^@/, '').replace(/^u\//, '').toLowerCase();
+    return bare || null;
+  }
+
   try {
-    const url = new URL(profileUrl);
+    const url = new URL(normalized);
     const parts = url.pathname.split('/').filter(Boolean);
     if (parts[0] === 'post') {
       return null;
@@ -98,10 +132,14 @@ async function fetchMoltbookPost(postId) {
 
 function postContainsChallenge(post, challengeCode) {
   if (!post) return false;
-  return (
-    pageContainsChallenge(post.content, challengeCode) ||
-    pageContainsChallenge(post.title, challengeCode)
-  );
+  const fields = [
+    post.content,
+    post.title,
+    post.content_preview,
+    post.body,
+    post.text
+  ];
+  return fields.some((field) => pageContainsChallenge(field, challengeCode));
 }
 
 /** Moltbook list API truncates post bodies (~500 chars). Fetch full post when needed. */
@@ -157,13 +195,13 @@ async function fetchWithTimeout(url, options = {}) {
   }
 }
 
-async function fetchMoltbookProfile(username) {
+async function fetchMoltbookProfileBundle(username) {
   const apiBase = getApiBaseUrl();
   const url = `${apiBase}/agents/profile?name=${encodeURIComponent(username)}`;
   const response = await fetchWithTimeout(url);
 
   if (response.status === 404) {
-    return null;
+    return { agent: null, recentPosts: [] };
   }
 
   if (!response.ok) {
@@ -171,7 +209,15 @@ async function fetchMoltbookProfile(username) {
   }
 
   const data = await response.json();
-  return data.agent || data.data?.agent || null;
+  return {
+    agent: data.agent || data.data?.agent || null,
+    recentPosts: data.recentPosts || data.data?.recentPosts || []
+  };
+}
+
+async function fetchMoltbookProfile(username) {
+  const bundle = await fetchMoltbookProfileBundle(username);
+  return bundle.agent;
 }
 
 async function fetchMoltbookPosts(username, limit = 25) {
@@ -213,9 +259,10 @@ class ApiMoltbookProvider {
 
   async verifyChallenge({ username, profileUrl, challengeCode }) {
     const normalized = username.toLowerCase().trim();
+    const resolvedProfileUrl = normalizeMoltbookProfileUrl(profileUrl, normalized);
 
-    if (profileUrl) {
-      const postId = extractPostIdFromUrl(profileUrl);
+    if (resolvedProfileUrl) {
+      const postId = extractPostIdFromUrl(resolvedProfileUrl);
       if (postId) {
         try {
           const post = await fetchMoltbookPost(postId);
@@ -239,7 +286,7 @@ class ApiMoltbookProvider {
           };
         }
       } else {
-        const urlUsername = extractUsernameFromProfileUrl(profileUrl);
+        const urlUsername = extractUsernameFromProfileUrl(resolvedProfileUrl);
         if (urlUsername && urlUsername !== normalized) {
           return {
             verified: false,
@@ -249,9 +296,9 @@ class ApiMoltbookProvider {
       }
     }
 
-    let profile;
+    let bundle;
     try {
-      profile = await fetchMoltbookProfile(normalized);
+      bundle = await fetchMoltbookProfileBundle(normalized);
     } catch (err) {
       return {
         verified: false,
@@ -259,6 +306,7 @@ class ApiMoltbookProvider {
       };
     }
 
+    const profile = bundle.agent;
     if (!profile) {
       return { verified: false, reason: 'Moltbook profile not found' };
     }
@@ -271,20 +319,24 @@ class ApiMoltbookProvider {
       return { verified: true, method: 'api' };
     }
 
+    if (bundle.recentPosts?.length && (await findChallengeInPosts(bundle.recentPosts, challengeCode))) {
+      return { verified: true, method: 'api' };
+    }
+
     try {
       const posts = await fetchMoltbookPosts(normalized);
-      if (await findChallengeInPosts(posts, challengeCode)) {
+      if (posts.length && (await findChallengeInPosts(posts, challengeCode))) {
         return { verified: true, method: 'api' };
       }
     } catch {
-      // posts fetch failed — fall through to not found
+      // posts list endpoint often unavailable — profile recentPosts is primary
     }
 
     return {
       verified: false,
       reason:
         'Verification code not found in your Moltbook profile or recent posts. ' +
-        'Try a short post containing only the code, or paste the direct link to the post that contains it.'
+        'Put the code on the first line of a real Moltbook post (not code-only), then paste the direct link to that post (e.g. https://www.moltbook.com/post/...).'
     };
   }
 }
@@ -384,7 +436,9 @@ module.exports = {
   ScrapeMoltbookProvider,
   extractUsernameFromProfileUrl,
   extractPostIdFromUrl,
+  normalizeMoltbookProfileUrl,
   fetchMoltbookProfile,
+  fetchMoltbookProfileBundle,
   fetchMoltbookPost,
   MOCK_USERNAMES
 };

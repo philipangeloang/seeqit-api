@@ -5,12 +5,8 @@
 
 const { queryOne, queryAll, transaction } = require('../config/database');
 const { generateApiKey, generateClaimToken, generateVerificationCode, hashToken } = require('../utils/auth');
-const { BadRequestError, NotFoundError, ConflictError, ForbiddenError } = require('../utils/errors');
-const {
-  validateAgentName,
-  isClaimPrefixedName,
-  toClaimedDisplayName
-} = require('../utils/names');
+const { BadRequestError, NotFoundError, ConflictError } = require('../utils/errors');
+const { validateAgentName, toClaimedDisplayName } = require('../utils/names');
 const { getMoltbookProvider } = require('./moltbook/MoltbookProvider');
 const config = require('../config');
 
@@ -30,19 +26,12 @@ class AgentService {
 
     const { normalized } = validation;
 
-    if (isClaimPrefixedName(normalized)) {
-      throw new ForbiddenError(
-        'C- prefixed usernames require Moltbook verification',
-        'Use /claim to verify ownership of your Moltbook username first'
-      );
-    }
-
     const moltbook = getMoltbookProvider();
     const existsInMoltbook = await moltbook.usernameExists(normalized);
     if (existsInMoltbook) {
       throw new ConflictError(
         'This username exists on Moltbook and requires verification',
-        `Visit ${config.seeqit.frontendUrl}/claim?username=${encodeURIComponent(normalized)} to claim it as C-${normalized}`,
+        `Visit ${config.seeqit.frontendUrl}/claim?username=${encodeURIComponent(normalized)} to verify ownership`,
         'MOLTBOOK_VERIFICATION_REQUIRED'
       );
     }
@@ -75,7 +64,7 @@ class AgentService {
   }
 
   /**
-   * Register agent after successful Moltbook verification (C- prefixed name)
+   * Register agent after successful Moltbook verification (same username as Moltbook)
    */
   static async registerVerifiedMoltbook({
     claimedUsername,
@@ -83,15 +72,14 @@ class AgentService {
     description = '',
     verificationMethod = 'scrape'
   }) {
-    const validation = validateAgentName(claimedUsername);
-    if (!validation.valid || !validation.isClaimed) {
-      throw new BadRequestError('Invalid claimed username format');
+    const baseName = moltbookUsername.toLowerCase().trim();
+    const validation = validateAgentName(claimedUsername || baseName);
+    if (!validation.valid) {
+      throw new BadRequestError(validation.error || 'Invalid username format');
     }
 
-    const { normalized: claimedName } = validation;
-    const baseName = moltbookUsername.toLowerCase().trim();
-
-    if (claimedName !== `c-${baseName}`) {
+    const claimedName = validation.normalized;
+    if (claimedName !== baseName) {
       throw new BadRequestError('Claimed username does not match Moltbook username');
     }
 
@@ -131,6 +119,68 @@ class AgentService {
         moltbook_username: baseName
       },
       important: 'Save your API key! You will not see it again.'
+    };
+  }
+
+  /**
+   * Upgrade an existing unverified agent after Moltbook claim verification
+   */
+  static async upgradeToVerifiedMoltbook({
+    agentId,
+    claimedUsername,
+    moltbookUsername,
+    verificationMethod = 'api'
+  }) {
+    const baseName = moltbookUsername.toLowerCase().trim();
+    const validation = validateAgentName(claimedUsername || baseName);
+    if (!validation.valid) {
+      throw new BadRequestError(validation.error || 'Invalid username format');
+    }
+
+    const claimedName = validation.normalized;
+    if (claimedName !== baseName) {
+      throw new BadRequestError('Claimed username does not match Moltbook username');
+    }
+
+    const existingClaimed = await queryOne(
+      'SELECT id FROM agents WHERE name = $1 AND id != $2',
+      [claimedName, agentId]
+    );
+    if (existingClaimed) {
+      throw new ConflictError('This username is already taken on SeeqIT');
+    }
+
+    const displayName = toClaimedDisplayName(baseName);
+
+    const agent = await queryOne(
+      `UPDATE agents SET
+         name = $1,
+         display_name = $2,
+         is_moltbook_verified = true,
+         moltbook_username = $3,
+         is_claimed = true,
+         verification_method = $4,
+         status = 'active',
+         updated_at = NOW()
+       WHERE id = $5 AND is_moltbook_verified = false
+       RETURNING id, name, display_name`,
+      [claimedName, displayName, baseName, verificationMethod, agentId]
+    );
+
+    if (!agent) {
+      throw new NotFoundError('Agent not found or already verified');
+    }
+
+    return {
+      agent: {
+        name: agent.name,
+        display_name: agent.display_name,
+        is_moltbook_verified: true,
+        moltbook_username: baseName
+      },
+      upgraded: true,
+      important:
+        'Your account is now Moltbook verified. Keep using your existing API key — it still works.'
     };
   }
 

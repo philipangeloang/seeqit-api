@@ -1,41 +1,39 @@
 /**
- * Agent name validation and C- prefix helpers for Moltbook claims
+ * Agent name validation and Moltbook claim helpers
  */
 
-const CLAIM_PREFIX = 'c-';
+const LEGACY_CLAIM_PREFIX = 'c-';
 const PLAIN_NAME_REGEX = /^[a-z0-9_-]+$/i;
-const CLAIMED_NAME_REGEX = /^c-[a-z0-9_-]+$/i;
 
 function normalizeAgentName(name) {
   if (!name || typeof name !== 'string') return '';
   return name.toLowerCase().trim();
 }
 
+/** @deprecated Legacy — strip old c- prefix from input */
 function isClaimPrefixedName(name) {
-  return normalizeAgentName(name).startsWith(CLAIM_PREFIX);
+  return normalizeAgentName(name).startsWith(LEGACY_CLAIM_PREFIX);
 }
 
+/** Normalize to base username (strips legacy c- prefix if present) */
 function extractBaseFromClaimed(name) {
   const normalized = normalizeAgentName(name);
-  if (!normalized.startsWith(CLAIM_PREFIX)) return normalized;
-  return normalized.slice(CLAIM_PREFIX.length);
+  if (!normalized.startsWith(LEGACY_CLAIM_PREFIX)) return normalized;
+  return normalized.slice(LEGACY_CLAIM_PREFIX.length);
 }
 
+/** Seeqit username after Moltbook claim — same as Moltbook username (no prefix) */
 function toClaimedUsername(baseName) {
-  const base = normalizeAgentName(baseName);
-  if (base.startsWith(CLAIM_PREFIX)) return base;
-  return `${CLAIM_PREFIX}${base}`;
+  return extractBaseFromClaimed(baseName);
 }
 
 function toClaimedDisplayName(baseName) {
-  const base = typeof baseName === 'string' ? baseName.trim() : '';
-  if (!base) return 'C-';
-  const normalized = base.toLowerCase();
-  if (normalized.startsWith(CLAIM_PREFIX)) {
-    const rest = base.slice(2);
-    return `C-${rest.charAt(0).toUpperCase()}${rest.slice(1)}`;
+  const normalized = extractBaseFromClaimed(baseName);
+  if (!normalized) return '';
+  if (typeof baseName === 'string' && baseName.trim() && !baseName.toLowerCase().startsWith(LEGACY_CLAIM_PREFIX)) {
+    return baseName.trim();
   }
-  return `C-${base.charAt(0).toUpperCase()}${base.slice(1)}`;
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
 function validateAgentName(name) {
@@ -49,28 +47,20 @@ function validateAgentName(name) {
     return { valid: false, error: 'Name must be 2-32 characters' };
   }
 
-  if (isClaimPrefixedName(normalized)) {
-    if (!CLAIMED_NAME_REGEX.test(normalized)) {
-      return {
-        valid: false,
-        error: 'Claimed names must be c- followed by letters, numbers, underscores, and hyphens'
-      };
-    }
-    return { valid: true, normalized, isClaimed: true };
-  }
+  const effective = extractBaseFromClaimed(normalized);
 
-  if (!PLAIN_NAME_REGEX.test(normalized)) {
+  if (!PLAIN_NAME_REGEX.test(effective)) {
     return {
       valid: false,
       error: 'Name can only contain letters, numbers, underscores, and hyphens'
     };
   }
 
-  return { valid: true, normalized, isClaimed: false };
+  return { valid: true, normalized: effective, isClaimed: false };
 }
 
 module.exports = {
-  CLAIM_PREFIX,
+  CLAIM_PREFIX: LEGACY_CLAIM_PREFIX,
   normalizeAgentName,
   isClaimPrefixedName,
   extractBaseFromClaimed,

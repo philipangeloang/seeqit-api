@@ -1,6 +1,6 @@
 /**
  * Cross-Platform Claim Service
- * Handles Moltbook username verification before allowing C- prefixed registration.
+ * Handles Moltbook username verification before verified registration.
  */
 
 const { queryOne } = require('../config/database');
@@ -11,9 +11,10 @@ const {
   toClaimedDisplayName,
   isClaimPrefixedName
 } = require('../utils/names');
-const { getMoltbookProvider } = require('./moltbook/MoltbookProvider');
+const { getMoltbookProvider, normalizeMoltbookProfileUrl } = require('./moltbook/MoltbookProvider');
 const AgentService = require('./AgentService');
 const config = require('../config');
+const { buildMoltbookVerificationInstructions } = require('../utils/claimInstructions');
 
 function randomHex(bytes) {
   const crypto = require('crypto');
@@ -75,16 +76,20 @@ class ClaimService {
     const claimedUsername = toClaimedUsername(normalized);
 
     const existingClaimed = await queryOne(
-      'SELECT id FROM agents WHERE name = $1',
+      'SELECT id, is_moltbook_verified FROM agents WHERE name = $1',
       [claimedUsername]
     );
-    if (existingClaimed) {
+    if (existingClaimed?.is_moltbook_verified) {
       throw new ConflictError('This Moltbook username has already been claimed on SeeqIT');
     }
 
-    const existingBase = await queryOne('SELECT id FROM agents WHERE name = $1', [normalized]);
-    if (existingBase) {
-      throw new ConflictError('This username is already registered on SeeqIT');
+    const existingBase = await queryOne(
+      `SELECT id, is_moltbook_verified, moltbook_username
+       FROM agents WHERE name = $1 OR moltbook_username = $1`,
+      [normalized]
+    );
+    if (existingBase?.is_moltbook_verified) {
+      throw new ConflictError('This Moltbook username has already been verified on SeeqIT');
     }
 
     const existingUser = await queryOne('SELECT id FROM users WHERE username = $1', [normalized]);
@@ -104,12 +109,29 @@ class ClaimService {
     const existsInMoltbook = await moltbook.usernameExists(normalized);
     const claimWindow = getClaimWindowStatus();
 
+    const pendingClaim = await queryOne(
+      `SELECT challenge_code, expires_at, claimed_username
+       FROM cross_claims
+       WHERE username = $1 AND status = 'pending' AND expires_at > NOW()`,
+      [normalized]
+    );
+
+    const isTakenOnSeeqit = !!(existingBase || existingUser);
+
     return {
       username: normalized,
       claimedUsername,
       suggestedClaimName: toClaimedDisplayName(normalized),
       existsInMoltbook,
       requiresVerification: existsInMoltbook,
+      isTakenOnSeeqit,
+      hasUnverifiedAgent: !!existingBase && !existingBase.is_moltbook_verified,
+      pendingClaim: pendingClaim
+        ? {
+            challengeCode: pendingClaim.challenge_code,
+            expiresAt: pendingClaim.expires_at
+          }
+        : null,
       claimWindow
     };
   }
@@ -126,6 +148,30 @@ class ClaimService {
 
     const normalized = checkResult.username;
     const claimedUsername = checkResult.claimedUsername;
+
+    const existingPending = await queryOne(
+      `SELECT challenge_code, expires_at, claimed_username
+       FROM cross_claims
+       WHERE username = $1 AND status = 'pending' AND expires_at > NOW()`,
+      [normalized]
+    );
+
+    if (existingPending) {
+      const instructions = buildMoltbookVerificationInstructions(
+        existingPending.challenge_code
+      );
+      return {
+        username: normalized,
+        claimedUsername: existingPending.claimed_username || claimedUsername,
+        suggestedClaimName: toClaimedDisplayName(normalized),
+        challengeCode: existingPending.challenge_code,
+        instructions,
+        expiresAt: new Date(existingPending.expires_at).toISOString(),
+        reusedExisting: true,
+        claimPath: `${config.seeqit.frontendUrl}/claim?username=${encodeURIComponent(normalized)}`
+      };
+    }
+
     const code = `seeqit-verify-${randomHex(4).toUpperCase()}`;
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
@@ -155,8 +201,9 @@ class ClaimService {
       claimedUsername,
       suggestedClaimName: toClaimedDisplayName(normalized),
       challengeCode: code,
-      instructions: `Post this code as a new post on your Moltbook profile (post content should contain only the code): "${code}". Then paste your Moltbook profile URL below and verify.`,
+      instructions: buildMoltbookVerificationInstructions(code),
       expiresAt: expiresAt.toISOString(),
+      reusedExisting: false,
       claimPath: `${config.seeqit.frontendUrl}/claim?username=${encodeURIComponent(normalized)}`
     };
   }
@@ -166,10 +213,11 @@ class ClaimService {
       throw new BadRequestError('Username and challenge code are required');
     }
 
-    if (!moltbookProfileUrl) {
+    const resolvedProfileUrl = normalizeMoltbookProfileUrl(moltbookProfileUrl, username);
+    if (!resolvedProfileUrl) {
       throw new BadRequestError(
         'Moltbook profile URL is required',
-        'Paste the URL of your Moltbook profile page'
+        'Paste the direct link to your Moltbook post (recommended), or your profile URL if the code is in a recent post'
       );
     }
 
@@ -203,14 +251,14 @@ class ClaimService {
     const moltbook = getMoltbookProvider();
     const verification = await moltbook.verifyChallenge({
       username: normalized,
-      profileUrl: moltbookProfileUrl,
+      profileUrl: resolvedProfileUrl,
       challengeCode
     });
 
     if (!verification.verified) {
       throw new BadRequestError(
         verification.reason || 'Could not verify Moltbook ownership',
-        'Ensure the code is posted on your Moltbook profile and the URL is correct'
+        'Ensure the code is on the first line of a real Moltbook post (not code-only) and the post URL is correct'
       );
     }
 
@@ -221,21 +269,39 @@ class ClaimService {
            moltbook_profile_url = $2,
            metadata = $3
        WHERE id = $1`,
-      [claim.id, moltbookProfileUrl, JSON.stringify(metadata)]
+      [claim.id, resolvedProfileUrl, JSON.stringify(metadata)]
     );
 
-    const result = await AgentService.registerVerifiedMoltbook({
-      claimedUsername: claim.claimed_username || toClaimedUsername(normalized),
-      moltbookUsername: normalized,
-      description: `Verified Moltbook user (cross-claimed from moltbook.com)`,
-      verificationMethod: verification.method || config.moltbook.provider
-    });
+    const claimedName = claim.claimed_username || toClaimedUsername(normalized);
+    const verificationMethod = verification.method || config.moltbook.provider;
+
+    const unverifiedAgent = await queryOne(
+      `SELECT id FROM agents
+       WHERE (name = $1 OR moltbook_username = $1)
+         AND is_moltbook_verified = false`,
+      [normalized]
+    );
+
+    const result = unverifiedAgent
+      ? await AgentService.upgradeToVerifiedMoltbook({
+          agentId: unverifiedAgent.id,
+          claimedUsername: claimedName,
+          moltbookUsername: normalized,
+          verificationMethod
+        })
+      : await AgentService.registerVerifiedMoltbook({
+          claimedUsername: claimedName,
+          moltbookUsername: normalized,
+          description: 'Verified Moltbook user (cross-claimed from moltbook.com)',
+          verificationMethod
+        });
 
     return {
       verified: true,
       username: normalized,
-      claimedUsername: claim.claimed_username || toClaimedUsername(normalized),
+      claimedUsername: claimedName,
       isMoltbookVerified: true,
+      upgradedExisting: !!unverifiedAgent,
       ...result
     };
   }

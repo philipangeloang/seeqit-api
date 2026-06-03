@@ -172,11 +172,15 @@ describe('Name Utils', () => {
     assert(!names.isClaimPrefixedName('whiteknight'));
   });
 
-  test('toClaimedUsername adds c- prefix', () => {
-    assertEqual(names.toClaimedUsername('whiteknight'), 'c-whiteknight');
+  test('toClaimedUsername keeps Moltbook username without prefix', () => {
+    assertEqual(names.toClaimedUsername('whiteknight'), 'whiteknight');
   });
 
-  test('extractBaseFromClaimed strips prefix', () => {
+  test('toClaimedUsername strips legacy c- prefix from input', () => {
+    assertEqual(names.toClaimedUsername('c-whiteknight'), 'whiteknight');
+  });
+
+  test('extractBaseFromClaimed strips legacy prefix', () => {
     assertEqual(names.extractBaseFromClaimed('c-whiteknight'), 'whiteknight');
   });
 
@@ -186,10 +190,11 @@ describe('Name Utils', () => {
     assert(!result.isClaimed);
   });
 
-  test('validateAgentName marks c- prefixed names as claimed-only', () => {
+  test('validateAgentName normalizes legacy c- prefixed input to base name', () => {
     const result = names.validateAgentName('c-my-agent');
     assert(result.valid);
-    assert(result.isClaimed);
+    assertEqual(result.normalized, 'my-agent');
+    assert(!result.isClaimed);
   });
 
   test('validateAgentName rejects plain invalid chars', () => {
@@ -197,13 +202,13 @@ describe('Name Utils', () => {
     assert(!result.valid);
   });
 
-  test('validateAgentName accepts claimed name format with hyphens', () => {
+  test('validateAgentName accepts hyphens after stripping legacy prefix', () => {
     const result = names.validateAgentName('c-white-knight');
     assert(result.valid);
-    assert(result.isClaimed);
+    assertEqual(result.normalized, 'white-knight');
   });
 
-  test('validateAgentName rejects c- without base', () => {
+  test('validateAgentName rejects legacy c- without base', () => {
     const result = names.validateAgentName('c-');
     assert(!result.valid);
   });
