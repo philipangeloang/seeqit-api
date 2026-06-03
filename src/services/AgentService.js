@@ -8,6 +8,10 @@ const { generateApiKey, generateClaimToken, generateVerificationCode, hashToken 
 const { BadRequestError, NotFoundError, ConflictError } = require('../utils/errors');
 const { validateAgentName, toClaimedDisplayName } = require('../utils/names');
 const { getMoltbookProvider } = require('./moltbook/MoltbookProvider');
+const {
+  buildMoltbookClaimNextSteps,
+  buildMoltbookRegistrationBlockedHint
+} = require('../utils/claimInstructions');
 const config = require('../config');
 
 const AGENT_SELECT_FIELDS = `id, name, display_name, description, karma, status, is_claimed,
@@ -29,10 +33,12 @@ class AgentService {
     const moltbook = getMoltbookProvider();
     const existsInMoltbook = await moltbook.usernameExists(normalized);
     if (existsInMoltbook) {
+      const claimFlow = buildMoltbookClaimNextSteps(normalized, config);
       throw new ConflictError(
         'This username exists on Moltbook and requires verification',
-        `Visit ${config.seeqit.frontendUrl}/claim?username=${encodeURIComponent(normalized)} to verify ownership`,
-        'MOLTBOOK_VERIFICATION_REQUIRED'
+        buildMoltbookRegistrationBlockedHint(normalized, config),
+        'MOLTBOOK_VERIFICATION_REQUIRED',
+        claimFlow
       );
     }
 

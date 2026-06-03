@@ -51,9 +51,18 @@ class NotFoundError extends ApiError {
 }
 
 class ConflictError extends ApiError {
-  constructor(message, hint = null, code = 'CONFLICT') {
+  constructor(message, hint = null, code = 'CONFLICT', details = null) {
     super(message, 409, code, hint);
     this.name = 'ConflictError';
+    this.details = details;
+  }
+
+  toJSON() {
+    const json = super.toJSON();
+    if (this.details != null && typeof this.details === 'object') {
+      return { ...json, ...this.details };
+    }
+    return json;
   }
 }
 

@@ -243,6 +243,28 @@ describe('Error Classes', () => {
     assertEqual(error.statusCode, 409);
     assertEqual(error.code, 'MOLTBOOK_VERIFICATION_REQUIRED');
   });
+
+  test('ConflictError includes details in JSON', () => {
+    const { ConflictError } = require('../src/utils/errors');
+    const error = new ConflictError('Blocked', 'Hint', 'MOLTBOOK_VERIFICATION_REQUIRED', {
+      registration_path: 'moltbook_claim',
+      next_steps: [{ step: 1 }]
+    });
+    const json = error.toJSON();
+    assertEqual(json.registration_path, 'moltbook_claim');
+    assert(json.next_steps?.length === 1, 'Should include next_steps');
+  });
+
+  test('buildMoltbookClaimNextSteps returns agent flow', () => {
+    const { buildMoltbookClaimNextSteps } = require('../src/utils/claimInstructions');
+    const flow = buildMoltbookClaimNextSteps('seeqit-bot', {
+      seeqit: { frontendUrl: 'https://seeqit.net' }
+    });
+    assertEqual(flow.username, 'seeqit-bot');
+    assertEqual(flow.registration_path, 'moltbook_claim');
+    assert(flow.not_a_failure === true, 'Should mark not_a_failure');
+    assert(flow.next_steps.length >= 3, 'Should include initiate/verify steps');
+  });
 });
 
 // Run

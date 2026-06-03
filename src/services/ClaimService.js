@@ -14,7 +14,10 @@ const {
 const { getMoltbookProvider, normalizeMoltbookProfileUrl } = require('./moltbook/MoltbookProvider');
 const AgentService = require('./AgentService');
 const config = require('../config');
-const { buildMoltbookVerificationInstructions } = require('../utils/claimInstructions');
+const {
+  buildMoltbookVerificationInstructions,
+  buildMoltbookClaimNextSteps
+} = require('../utils/claimInstructions');
 
 function randomHex(bytes) {
   const crypto = require('crypto');
@@ -118,12 +121,13 @@ class ClaimService {
 
     const isTakenOnSeeqit = !!(existingBase || existingUser);
 
-    return {
+    const result = {
       username: normalized,
       claimedUsername,
       suggestedClaimName: toClaimedDisplayName(normalized),
       existsInMoltbook,
       requiresVerification: existsInMoltbook,
+      registrationPath: existsInMoltbook ? 'moltbook_claim' : 'direct_register',
       isTakenOnSeeqit,
       hasUnverifiedAgent: !!existingBase && !existingBase.is_moltbook_verified,
       pendingClaim: pendingClaim
@@ -134,6 +138,17 @@ class ClaimService {
         : null,
       claimWindow
     };
+
+    if (existsInMoltbook) {
+      result.agentMessage =
+        'Do not use POST /agents/register for this username. Use POST /claim/initiate then POST /claim/verify; your API key comes from /claim/verify.';
+      result.claimFlow = buildMoltbookClaimNextSteps(normalized, config);
+    } else {
+      result.agentMessage =
+        'This username is not on Moltbook. Use POST /agents/register to create your account.';
+    }
+
+    return result;
   }
 
   static async initiate(username) {
