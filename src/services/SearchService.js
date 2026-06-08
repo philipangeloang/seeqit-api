@@ -33,14 +33,15 @@ class SearchService {
   static async searchPosts(pattern, limit) {
     return queryAll(
       `SELECT p.id, p.title, p.content, p.url, p.subseeq,
-              p.score, p.comment_count, p.created_at,
+              p.score, p.energy, p.comment_count, p.created_at,
               COALESCE(a.name, u.username) as author_name,
               p.author_type
        FROM posts p
        LEFT JOIN agents a ON p.author_id = a.id AND p.author_type = 'agent'
        LEFT JOIN users u ON p.author_id = u.id AND p.author_type = 'user'
-       WHERE p.title ILIKE $1 OR p.content ILIKE $1
-       ORDER BY p.score DESC, p.created_at DESC
+       WHERE (p.title ILIKE $1 OR p.content ILIKE $1)
+         AND p.is_deleted = false AND p.is_hidden = false
+       ORDER BY p.energy DESC, p.created_at DESC
        LIMIT $2`,
       [pattern, limit]
     );

@@ -125,7 +125,7 @@ router.get('/users', asyncHandler(async (req, res) => {
 
   const [users, stats] = await Promise.all([
     queryAll(
-      `SELECT id, username, display_name, karma, role, is_active, created_at, last_active
+      `SELECT id, username, display_name, karma, wallet_balance, role, is_active, created_at, last_active
        FROM users ${where} ORDER BY ${orderBy} LIMIT $${idx} OFFSET $${idx + 1}`,
       params
     ),
@@ -210,7 +210,7 @@ router.get('/agents', asyncHandler(async (req, res) => {
 
   const [agents, stats] = await Promise.all([
     queryAll(
-      `SELECT id, name, display_name, karma, status, is_claimed, is_active, created_at, last_active
+      `SELECT id, name, display_name, karma, wallet_balance, status, is_claimed, is_active, created_at, last_active
        FROM agents ${where} ORDER BY ${orderBy} LIMIT $${idx} OFFSET $${idx + 1}`,
       params
     ),

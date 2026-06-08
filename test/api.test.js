@@ -44,6 +44,12 @@ function assertEqual(actual, expected, message) {
   }
 }
 
+function assertApprox(actual, expected, epsilon = 0.01, message) {
+  if (Math.abs(actual - expected) > epsilon) {
+    throw new Error(message || `Expected ~${expected}, got ${actual}`);
+  }
+}
+
 async function runTests() {
   console.log('\nSeeqit API Test Suite\n');
   console.log('='.repeat(50));
@@ -264,6 +270,94 @@ describe('Error Classes', () => {
     assertEqual(flow.registration_path, 'moltbook_claim');
     assert(flow.not_a_failure === true, 'Should mark not_a_failure');
     assert(flow.next_steps.length >= 3, 'Should include initiate/verify steps');
+  });
+});
+
+describe('Energy Utils', () => {
+  const energy = require('../src/utils/energy');
+
+  test('computeEnergyDelta returns vote value in MVP', () => {
+    assertEqual(energy.computeEnergyDelta({ value: 1 }), 1);
+    assertEqual(energy.computeEnergyDelta({ value: -1 }), -1);
+  });
+
+  test('computeWeight uses Mitchell sqrt anti-whale formula', () => {
+    assertEqual(energy.computeWeight(0), 1);
+    assertApprox(energy.computeWeight(50), 2.27);
+    assertApprox(energy.computeWeight(100), 2.796);
+    assertApprox(energy.computeWeight(1000), 6.682);
+  });
+
+  test('computeAuthorBonus is disabled until Mitchell confirms', () => {
+    assertEqual(energy.computeAuthorBonus(0), 0);
+    assertEqual(energy.computeAuthorBonus(100), 0);
+    assertEqual(energy.computeAuthorBonus(1000), 0);
+  });
+
+  test('computeAppliedEnergy rounds weighted vote energy', () => {
+    assertEqual(energy.computeAppliedEnergy(1, 2.27, 0), 2);
+    assertEqual(energy.computeAppliedEnergy(-1, 1, 0), -1);
+    assertEqual(energy.computeAppliedEnergy(0, 2, 0), 0);
+    assertEqual(energy.computeAppliedEnergy(1, 6.682, 0), 7);
+  });
+
+  test('computeEnergyChange handles flip and remove correctly', () => {
+    const flip = energy.computeEnergyChange(7, -1, 6.682, 0);
+    assertEqual(flip.newApplied, -7);
+    assertEqual(flip.energyDelta, -14);
+
+    const remove = energy.computeEnergyChange(7, null, 6.682, 0);
+    assertEqual(remove.newApplied, 0);
+    assertEqual(remove.energyDelta, -7);
+
+    const newVote = energy.computeEnergyChange(0, 1, 2.27, 0);
+    assertEqual(newVote.newApplied, 2);
+    assertEqual(newVote.energyDelta, 2);
+  });
+
+  test('mapVoteDirection maps numeric votes', () => {
+    assertEqual(energy.mapVoteDirection(1), 'up');
+    assertEqual(energy.mapVoteDirection(-1), 'down');
+    assertEqual(energy.mapVoteDirection(null), null);
+  });
+
+  test('computeCounterDeltas handles new vote', () => {
+    const d = energy.computeCounterDeltas(null, 1);
+    assertEqual(d.upDelta, 1);
+    assertEqual(d.downDelta, 0);
+  });
+
+  test('computeCounterDeltas handles flip from up to down', () => {
+    const d = energy.computeCounterDeltas(1, -1);
+    assertEqual(d.upDelta, -1);
+    assertEqual(d.downDelta, 1);
+  });
+
+  test('computeCounterDeltas handles vote removal', () => {
+    const d = energy.computeCounterDeltas(1, null);
+    assertEqual(d.upDelta, -1);
+    assertEqual(d.downDelta, 0);
+  });
+
+  test('checkAutoModeration triggers hide threshold', () => {
+    const r = energy.checkAutoModeration(-10, 3, 2);
+    assert(r.hide, 'Should hide at -10 with 5 votes');
+    assert(!r.softDelete);
+  });
+
+  test('checkAutoModeration triggers soft delete threshold', () => {
+    const r = energy.checkAutoModeration(-25, 5, 5);
+    assert(r.hide);
+    assert(r.softDelete);
+  });
+
+  test('getTimeRangeFilter returns SQL for day', () => {
+    const f = energy.getTimeRangeFilter('day');
+    assert(f.includes('1 day'), 'Should filter last day');
+  });
+
+  test('getTimeRangeFilter returns null for all', () => {
+    assertEqual(energy.getTimeRangeFilter('all'), null);
   });
 });
 

@@ -132,7 +132,7 @@ class UserService {
    */
   static async findById(id) {
     return queryOne(
-      `SELECT id, username, display_name, description, avatar_url, karma,
+      `SELECT id, username, display_name, description, avatar_url, karma, wallet_balance,
               follower_count, following_count, is_active, role, created_at, last_active
        FROM users WHERE id = $1`,
       [id]
@@ -144,7 +144,7 @@ class UserService {
    */
   static async findByUsername(username) {
     return queryOne(
-      `SELECT id, username, display_name, description, avatar_url, karma,
+      `SELECT id, username, display_name, description, avatar_url, karma, wallet_balance,
               follower_count, following_count, is_active, role, created_at, last_active
        FROM users WHERE username = $1`,
       [username.toLowerCase().trim()]
@@ -191,11 +191,16 @@ class UserService {
   /**
    * Update user karma
    */
-  static async updateKarma(id, delta) {
-    const result = await queryOne(
-      'UPDATE users SET karma = karma + $2 WHERE id = $1 RETURNING karma',
-      [id, delta]
-    );
+  static async updateKarma(id, delta, client = null) {
+    const sql = 'UPDATE users SET karma = karma + $2 WHERE id = $1 RETURNING karma';
+    const params = [id, delta];
+
+    if (client) {
+      const result = await client.query(sql, params);
+      return result.rows[0]?.karma || 0;
+    }
+
+    const result = await queryOne(sql, params);
     return result?.karma || 0;
   }
 
@@ -230,7 +235,7 @@ class UserService {
     }
 
     return queryAll(
-      `SELECT id, username, display_name, description, avatar_url, karma,
+      `SELECT id, username, display_name, description, avatar_url, karma, wallet_balance,
               follower_count, following_count, created_at
        FROM users WHERE is_active = true
        ORDER BY ${orderBy}

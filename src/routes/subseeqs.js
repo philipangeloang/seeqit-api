@@ -9,6 +9,7 @@ const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { success, created, paginated } = require('../utils/response');
 const SubseeqService = require('../services/SubseeqService');
 const PostService = require('../services/PostService');
+const VoteService = require('../services/VoteService');
 
 const router = Router();
 
@@ -87,13 +88,18 @@ router.patch('/:name/settings', requireAuth, asyncHandler(async (req, res) => {
  * Get posts in a subseeq
  */
 router.get('/:name/feed', optionalAuth, asyncHandler(async (req, res) => {
-  const { sort = 'hot', limit = 25, offset = 0 } = req.query;
+  const { sort = 'hot', t = 'all', limit = 25, offset = 0 } = req.query;
 
-  const posts = await PostService.getBySubseeq(req.params.name, {
+  let posts = await PostService.getBySubseeq(req.params.name, {
     sort,
+    timeRange: t,
     limit: Math.min(parseInt(limit, 10), 100),
     offset: parseInt(offset, 10) || 0
   });
+
+  if (req.actor) {
+    posts = await VoteService.enrichPostsWithVotes(posts, req.actor.id);
+  }
 
   paginated(res, posts, { limit: parseInt(limit, 10), offset: parseInt(offset, 10) || 0 });
 }));

@@ -1,14 +1,20 @@
 /**
  * Vote Service
- * Handles upvotes, downvotes, and karma calculations
+ * Handles upvotes, downvotes, karma, and weighted energy calculations
  */
 
 const { queryOne, queryAll, transaction } = require('../config/database');
 const { BadRequestError, NotFoundError } = require('../utils/errors');
+const {
+  computeEnergyChange,
+  computeCounterDeltas,
+  mapVoteDirection
+} = require('../utils/energy');
 const AgentService = require('./AgentService');
 const UserService = require('./UserService');
 const PostService = require('./PostService');
 const CommentService = require('./CommentService');
+const WalletService = require('./WalletService');
 
 const VOTE_UP = 1;
 const VOTE_DOWN = -1;
@@ -30,81 +36,139 @@ class VoteService {
     return this.vote({ targetId: commentId, targetType: 'comment', voterId, voterType, value: VOTE_DOWN });
   }
 
-  /**
-   * Internal vote logic
-   */
+  static async recordEnergyVote(client, {
+    voterId, voterType, targetId, targetType,
+    energyAmount, voterWeight, authorBonus, voteValue, action
+  }) {
+    await client.query(
+      `INSERT INTO energy_votes
+         (voter_id, voter_type, target_id, target_type, energy_amount, voter_weight, author_bonus, vote_value, action)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [voterId, voterType, targetId, targetType, energyAmount, voterWeight, authorBonus, voteValue, action]
+    );
+  }
+
   static async vote({ targetId, targetType, voterId, voterType = 'agent', value }) {
     const target = await this.getTarget(targetId, targetType);
 
-    // Prevent self-voting
     if (target.author_id === voterId) {
       throw new BadRequestError('Cannot vote on your own content');
     }
 
-    // Get existing vote
     const existingVote = await queryOne(
-      'SELECT id, value FROM votes WHERE voter_id = $1 AND target_id = $2 AND target_type = $3',
+      'SELECT id, value, energy_applied FROM votes WHERE voter_id = $1 AND target_id = $2 AND target_type = $3',
       [voterId, targetId, targetType]
     );
 
     let action;
-    let scoreDelta;
-    let karmaDelta;
+    let previousValue = existingVote?.value ?? null;
+    let oldApplied = existingVote?.energy_applied ?? 0;
+    let newValue;
 
     if (existingVote) {
       if (existingVote.value === value) {
-        // Same vote again = remove vote
         action = 'removed';
-        scoreDelta = -value;
-        karmaDelta = -value;
-
-        await queryOne('DELETE FROM votes WHERE id = $1', [existingVote.id]);
+        newValue = null;
       } else {
-        // Changing vote
         action = 'changed';
-        scoreDelta = value * 2;
-        karmaDelta = value * 2;
-
-        await queryOne('UPDATE votes SET value = $2 WHERE id = $1', [existingVote.id, value]);
+        newValue = value;
       }
     } else {
-      // New vote
       action = value === VOTE_UP ? 'upvoted' : 'downvoted';
-      scoreDelta = value;
-      karmaDelta = value;
-
-      await queryOne(
-        'INSERT INTO votes (voter_id, voter_type, target_id, target_type, value) VALUES ($1, $2, $3, $4, $5)',
-        [voterId, voterType, targetId, targetType, value]
-      );
+      newValue = value;
     }
 
-    // Update target score
-    if (targetType === 'post') {
-      await PostService.updateScore(targetId, scoreDelta);
-    } else {
-      await CommentService.updateScore(targetId, scoreDelta, value === VOTE_UP);
-    }
+    const voteContext = await WalletService.getVoteContext(
+      voterId,
+      voterType,
+      target.author_id,
+      target.author_type
+    );
 
-    // Update author karma — dispatch to correct service based on author_type
-    if (target.author_type === 'user') {
-      await UserService.updateKarma(target.author_id, karmaDelta);
-    } else {
-      await AgentService.updateKarma(target.author_id, karmaDelta);
-    }
+    const { voterWeight, authorBonus } = voteContext;
+    const { energyDelta, newApplied } = computeEnergyChange(
+      oldApplied,
+      newValue,
+      voterWeight,
+      authorBonus
+    );
+
+    const scoreDelta = (newValue ?? 0) - (previousValue ?? 0);
+    const karmaDelta = scoreDelta;
+    const { upDelta, downDelta } = computeCounterDeltas(previousValue, newValue);
+
+    const result = await transaction(async (client) => {
+      if (existingVote) {
+        if (newValue === null) {
+          await client.query('DELETE FROM votes WHERE id = $1', [existingVote.id]);
+        } else {
+          await client.query(
+            'UPDATE votes SET value = $2, energy_applied = $3 WHERE id = $1',
+            [existingVote.id, newValue, newApplied]
+          );
+        }
+      } else {
+        await client.query(
+          `INSERT INTO votes (voter_id, voter_type, target_id, target_type, value, energy_applied)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [voterId, voterType, targetId, targetType, newValue, newApplied]
+        );
+      }
+
+      await this.recordEnergyVote(client, {
+        voterId,
+        voterType,
+        targetId,
+        targetType,
+        energyAmount: energyDelta,
+        voterWeight,
+        authorBonus,
+        voteValue: newValue ?? previousValue ?? value,
+        action
+      });
+
+      let stats;
+      if (targetType === 'post') {
+        stats = await PostService.updateVoteStats(client, targetId, {
+          scoreDelta,
+          energyDelta,
+          upDelta,
+          downDelta
+        });
+        await PostService.applyAutoModeration(client, targetId, stats);
+      } else {
+        stats = await CommentService.updateVoteStats(client, targetId, {
+          scoreDelta,
+          energyDelta,
+          upDelta,
+          downDelta
+        });
+      }
+
+      if (target.author_type === 'user') {
+        await UserService.updateKarma(target.author_id, karmaDelta, client);
+      } else {
+        await AgentService.updateKarma(target.author_id, karmaDelta, client);
+      }
+
+      return stats;
+    });
 
     return {
       success: true,
       message: action === 'upvoted' ? 'Upvoted!' :
                action === 'downvoted' ? 'Downvoted!' :
                action === 'removed' ? 'Vote removed!' : 'Vote changed!',
-      action
+      action,
+      score: result.score,
+      energy: result.energy,
+      energyApplied: newApplied,
+      voterWeight,
+      authorBonus,
+      userVote: mapVoteDirection(newValue)
     };
   }
 
-  /**
-   * Get target (post or comment) info including author_type
-   */
   static async getTarget(targetId, targetType) {
     let target;
 
@@ -129,21 +193,15 @@ class VoteService {
     return target;
   }
 
-  /**
-   * Get actor's vote on a target
-   */
   static async getVote(actorId, targetId, targetType) {
     const vote = await queryOne(
       'SELECT value FROM votes WHERE voter_id = $1 AND target_id = $2 AND target_type = $3',
       [actorId, targetId, targetType]
     );
 
-    return vote?.value || null;
+    return vote?.value ?? null;
   }
 
-  /**
-   * Get multiple votes (batch)
-   */
   static async getVotes(actorId, targets) {
     if (targets.length === 0) return new Map();
 
@@ -171,6 +229,43 @@ class VoteService {
     }
 
     return results;
+  }
+
+  static async enrichPostsWithVotes(posts, actorId) {
+    if (!actorId || posts.length === 0) return posts;
+
+    const votes = await this.getVotes(
+      actorId,
+      posts.map(p => ({ targetId: p.id, targetType: 'post' }))
+    );
+
+    return posts.map(p => ({
+      ...p,
+      userVote: mapVoteDirection(votes.get(p.id))
+    }));
+  }
+
+  static async enrichCommentsWithVotes(comments, actorId) {
+    if (!actorId || comments.length === 0) return comments;
+
+    const votes = await this.getVotes(
+      actorId,
+      comments.map(c => ({ targetId: c.id, targetType: 'comment' }))
+    );
+
+    return comments.map(c => ({
+      ...c,
+      userVote: mapVoteDirection(votes.get(c.id))
+    }));
+  }
+
+  /**
+   * Get viewer's current vote weight for UI
+   */
+  static async getViewerVoteWeight(actorId, actorType) {
+    const balance = await WalletService.getBalance(actorId, actorType);
+    const { computeWeight } = require('../utils/energy');
+    return computeWeight(balance);
   }
 }
 

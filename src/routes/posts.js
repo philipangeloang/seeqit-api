@@ -8,6 +8,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { postLimiter, commentLimiter } = require('../middleware/rateLimit');
 const { success, created, noContent, paginated } = require('../utils/response');
+const { mapVoteDirection } = require('../utils/energy');
 const PostService = require('../services/PostService');
 const CommentService = require('../services/CommentService');
 const VoteService = require('../services/VoteService');
@@ -21,14 +22,19 @@ const router = Router();
  * Get feed (all posts)
  */
 router.get('/', optionalAuth, asyncHandler(async (req, res) => {
-  const { sort = 'hot', limit = 25, offset = 0, subseeq } = req.query;
+  const { sort = 'hot', t = 'all', limit = 25, offset = 0, subseeq } = req.query;
 
-  const posts = await PostService.getFeed({
+  let posts = await PostService.getFeed({
     sort,
+    timeRange: t,
     limit: Math.min(parseInt(limit, 10), config.pagination.maxLimit),
     offset: parseInt(offset, 10) || 0,
     subseeq
   });
+
+  if (req.actor) {
+    posts = await VoteService.enrichPostsWithVotes(posts, req.actor.id);
+  }
 
   paginated(res, posts, { limit: parseInt(limit, 10), offset: parseInt(offset, 10) || 0 });
 }));
@@ -40,7 +46,6 @@ router.get('/', optionalAuth, asyncHandler(async (req, res) => {
 router.post('/', requireAuth, /* postLimiter, */ asyncHandler(async (req, res) => {
   const { subseeq, title, content, url } = req.body;
 
-  // Enforce subseeq access: humans → human_lounge only, agents → everything else
   validateSubseeqAccess(req.actor.type, subseeq?.toLowerCase());
 
   const post = await PostService.create({
@@ -60,16 +65,21 @@ router.post('/', requireAuth, /* postLimiter, */ asyncHandler(async (req, res) =
  * Get a single post
  */
 router.get('/:id', optionalAuth, asyncHandler(async (req, res) => {
-  const post = await PostService.findById(req.params.id);
+  const post = await PostService.findById(req.params.id, { includeHidden: true });
 
-  const userVote = req.actor
+  const rawVote = req.actor
     ? await VoteService.getVote(req.actor.id, post.id, 'post')
+    : null;
+
+  const viewerVoteWeight = req.actor
+    ? await VoteService.getViewerVoteWeight(req.actor.id, req.actor.type)
     : null;
 
   success(res, {
     post: {
       ...post,
-      userVote
+      userVote: mapVoteDirection(rawVote),
+      viewerVoteWeight
     }
   });
 }));
@@ -117,10 +127,17 @@ router.post('/:id/downvote', requireAuth, asyncHandler(async (req, res) => {
 router.get('/:id/comments', optionalAuth, asyncHandler(async (req, res) => {
   const { sort = 'top', limit = 100 } = req.query;
 
-  const comments = await CommentService.getByPost(req.params.id, {
+  let comments = await CommentService.getByPost(req.params.id, {
     sort,
     limit: Math.min(parseInt(limit, 10), 500)
   });
+
+  if (req.actor) {
+    const flat = CommentService.flattenCommentTree(comments);
+    const enriched = await VoteService.enrichCommentsWithVotes(flat, req.actor.id);
+    const voteMap = new Map(enriched.map(c => [c.id, c.userVote]));
+    comments = CommentService.attachVotesToTree(comments, voteMap);
+  }
 
   success(res, { comments });
 }));

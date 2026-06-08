@@ -3,11 +3,10 @@
  * Handles nested comment creation and retrieval
  */
 
-const { queryOne, queryAll, transaction } = require('../config/database');
+const { queryOne, queryAll } = require('../config/database');
 const { BadRequestError, NotFoundError, ForbiddenError } = require('../utils/errors');
 const PostService = require('./PostService');
 
-// Shared dual-JOIN fragment for author resolution
 const AUTHOR_JOIN = `
   LEFT JOIN agents a ON c.author_id = a.id AND c.author_type = 'agent'
   LEFT JOIN users u ON c.author_id = u.id AND c.author_type = 'user'`;
@@ -18,9 +17,6 @@ const AUTHOR_SELECT = `
   c.author_type`;
 
 class CommentService {
-  /**
-   * Create a new comment
-   */
   static async create({ postId, authorId, authorType = 'agent', content, parentId = null }) {
     if (!content || content.trim().length === 0) {
       throw new BadRequestError('Content is required');
@@ -56,7 +52,7 @@ class CommentService {
     const comment = await queryOne(
       `INSERT INTO comments (post_id, author_id, author_type, content, parent_id, depth)
        VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, content, score, depth, author_type, created_at`,
+       RETURNING id, content, score, energy, depth, author_type, created_at`,
       [postId, authorId, authorType, content.trim(), parentId, depth]
     );
 
@@ -65,9 +61,6 @@ class CommentService {
     return comment;
   }
 
-  /**
-   * Get comments for a post
-   */
   static async getByPost(postId, { sort = 'top', limit = 100 }) {
     let orderBy;
 
@@ -81,17 +74,17 @@ class CommentService {
         break;
       case 'top':
       default:
-        orderBy = 'c.score DESC, c.created_at ASC';
+        orderBy = 'c.energy DESC, c.created_at ASC';
         break;
     }
 
     const comments = await queryAll(
-      `SELECT c.id, c.content, c.score, c.upvotes, c.downvotes,
+      `SELECT c.id, c.content, c.score, c.energy, c.upvotes, c.downvotes,
               c.parent_id, c.depth, c.created_at,
               ${AUTHOR_SELECT}
        FROM comments c
        ${AUTHOR_JOIN}
-       WHERE c.post_id = $1
+       WHERE c.post_id = $1 AND c.is_deleted = false
        ORDER BY c.depth ASC, ${orderBy}
        LIMIT $2`,
       [postId, limit]
@@ -101,8 +94,30 @@ class CommentService {
   }
 
   /**
-   * Build nested comment tree from flat list
+   * Flat list for vote enrichment
    */
+  static flattenCommentTree(comments) {
+    const flat = [];
+    const walk = (nodes) => {
+      for (const node of nodes) {
+        flat.push(node);
+        if (node.replies?.length) walk(node.replies);
+      }
+    };
+    walk(comments);
+    return flat;
+  }
+
+  static attachVotesToTree(comments, voteMap) {
+    const attach = (nodes) =>
+      nodes.map(c => ({
+        ...c,
+        userVote: voteMap.get(c.id) ?? c.userVote,
+        replies: c.replies?.length ? attach(c.replies) : []
+      }));
+    return attach(comments);
+  }
+
   static buildCommentTree(comments) {
     const commentMap = new Map();
     const rootComments = [];
@@ -123,9 +138,6 @@ class CommentService {
     return rootComments;
   }
 
-  /**
-   * Get comment by ID
-   */
   static async findById(id) {
     const comment = await queryOne(
       `SELECT c.*, ${AUTHOR_SELECT}
@@ -142,9 +154,6 @@ class CommentService {
     return comment;
   }
 
-  /**
-   * Delete a comment
-   */
   static async delete(commentId, actorId) {
     const comment = await queryOne(
       'SELECT author_id, post_id FROM comments WHERE id = $1',
@@ -165,9 +174,23 @@ class CommentService {
     );
   }
 
-  /**
-   * Update comment score
-   */
+  static async updateVoteStats(client, commentId, { scoreDelta, energyDelta, upDelta, downDelta }) {
+    const result = await client.query(
+      `UPDATE comments
+       SET score = score + $2,
+           energy = energy + $3,
+           upvotes = GREATEST(0, upvotes + $4),
+           downvotes = GREATEST(0, downvotes + $5),
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING score, energy, upvotes, downvotes`,
+      [commentId, scoreDelta, energyDelta, upDelta, downDelta]
+    );
+
+    return result.rows[0];
+  }
+
+  /** @deprecated use updateVoteStats */
   static async updateScore(commentId, delta, isUpvote) {
     const voteField = isUpvote ? 'upvotes' : 'downvotes';
     const voteChange = delta > 0 ? 1 : -1;
@@ -175,9 +198,10 @@ class CommentService {
     const result = await queryOne(
       `UPDATE comments
        SET score = score + $2,
+           energy = energy + $2,
            ${voteField} = ${voteField} + $3
        WHERE id = $1
-       RETURNING score`,
+       RETURNING score, energy`,
       [commentId, delta, voteChange]
     );
 

@@ -14,7 +14,7 @@ const {
 } = require('../utils/claimInstructions');
 const config = require('../config');
 
-const AGENT_SELECT_FIELDS = `id, name, display_name, description, karma, status, is_claimed,
+const AGENT_SELECT_FIELDS = `id, name, display_name, description, karma, wallet_balance, status, is_claimed,
   is_moltbook_verified, moltbook_username, verification_method,
   follower_count, following_count, created_at, last_active`;
 
@@ -307,12 +307,16 @@ class AgentService {
     return agent;
   }
 
-  static async updateKarma(id, delta) {
-    const result = await queryOne(
-      `UPDATE agents SET karma = karma + $2 WHERE id = $1 RETURNING karma`,
-      [id, delta]
-    );
+  static async updateKarma(id, delta, client = null) {
+    const sql = `UPDATE agents SET karma = karma + $2 WHERE id = $1 RETURNING karma`;
+    const params = [id, delta];
 
+    if (client) {
+      const result = await client.query(sql, params);
+      return result.rows[0]?.karma || 0;
+    }
+
+    const result = await queryOne(sql, params);
     return result?.karma || 0;
   }
 

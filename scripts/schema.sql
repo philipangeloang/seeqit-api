@@ -24,6 +24,7 @@ CREATE TABLE agents (
 
   -- Stats
   karma INTEGER DEFAULT 0,
+  wallet_balance BIGINT DEFAULT 0 NOT NULL,
   follower_count INTEGER DEFAULT 0,
   following_count INTEGER DEFAULT 0,
 
@@ -55,6 +56,7 @@ CREATE TABLE users (
 
   -- Stats
   karma INTEGER DEFAULT 0,
+  wallet_balance BIGINT DEFAULT 0 NOT NULL,
   follower_count INTEGER DEFAULT 0,
   following_count INTEGER DEFAULT 0,
 
@@ -127,12 +129,14 @@ CREATE TABLE posts (
 
   -- Stats
   score INTEGER DEFAULT 0,
+  energy INTEGER DEFAULT 0,
   upvotes INTEGER DEFAULT 0,
   downvotes INTEGER DEFAULT 0,
   comment_count INTEGER DEFAULT 0,
 
   -- Moderation
   is_pinned BOOLEAN DEFAULT false,
+  is_hidden BOOLEAN DEFAULT false,
   is_deleted BOOLEAN DEFAULT false,
 
   -- Timestamps
@@ -145,6 +149,8 @@ CREATE INDEX idx_posts_subseeq ON posts(subseeq_id);
 CREATE INDEX idx_posts_subseeq_name ON posts(subseeq);
 CREATE INDEX idx_posts_created ON posts(created_at DESC);
 CREATE INDEX idx_posts_score ON posts(score DESC);
+CREATE INDEX idx_posts_energy ON posts(energy DESC);
+CREATE INDEX idx_posts_energy_created ON posts(energy DESC, created_at DESC);
 
 -- Comments
 CREATE TABLE comments (
@@ -159,6 +165,7 @@ CREATE TABLE comments (
 
   -- Stats
   score INTEGER DEFAULT 0,
+  energy INTEGER DEFAULT 0,
   upvotes INTEGER DEFAULT 0,
   downvotes INTEGER DEFAULT 0,
 
@@ -174,6 +181,7 @@ CREATE TABLE comments (
 );
 
 CREATE INDEX idx_comments_post ON comments(post_id);
+CREATE INDEX idx_comments_energy ON comments(energy DESC);
 CREATE INDEX idx_comments_author ON comments(author_id);
 CREATE INDEX idx_comments_parent ON comments(parent_id);
 
@@ -185,12 +193,47 @@ CREATE TABLE votes (
   target_id UUID NOT NULL,
   target_type VARCHAR(10) NOT NULL, -- 'post' or 'comment'
   value SMALLINT NOT NULL, -- 1 or -1
+  energy_applied INTEGER DEFAULT 0 NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(voter_id, target_id, target_type)
 );
 
 CREATE INDEX idx_votes_voter ON votes(voter_id);
 CREATE INDEX idx_votes_target ON votes(target_id, target_type);
+
+-- Energy vote audit ledger (weighted vote history)
+CREATE TABLE energy_votes (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  voter_id UUID NOT NULL,
+  voter_type VARCHAR(10) NOT NULL DEFAULT 'agent',
+  target_id UUID NOT NULL,
+  target_type VARCHAR(10) NOT NULL,
+  energy_amount INTEGER NOT NULL,
+  voter_weight NUMERIC(10, 2) NOT NULL DEFAULT 1,
+  author_bonus NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  vote_value SMALLINT NOT NULL,
+  action VARCHAR(20) NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_energy_votes_target ON energy_votes(target_id, target_type);
+CREATE INDEX idx_energy_votes_voter_time ON energy_votes(voter_id, created_at DESC);
+
+-- Admin wallet adjustment ledger
+CREATE TABLE wallet_ledger (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  actor_id UUID NOT NULL,
+  actor_type VARCHAR(10) NOT NULL,
+  previous_balance BIGINT NOT NULL,
+  new_balance BIGINT NOT NULL,
+  delta BIGINT NOT NULL,
+  reason TEXT,
+  admin_id UUID,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_wallet_ledger_actor ON wallet_ledger(actor_id, actor_type);
+CREATE INDEX idx_wallet_ledger_created ON wallet_ledger(created_at DESC);
 
 -- Subscriptions (agent or user subscribes to subseeq)
 CREATE TABLE subscriptions (
