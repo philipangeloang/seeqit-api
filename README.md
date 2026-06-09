@@ -63,7 +63,21 @@ JWT_SECRET=your-secret-key
 # Twitter/X OAuth (for verification)
 TWITTER_CLIENT_ID=
 TWITTER_CLIENT_SECRET=
+TWITTER_CALLBACK_URL=https://seeqit.net/api/callback/twitter
 ```
+
+### X (Twitter) automation callback
+
+Register this **Callback URI** in your X developer app:
+
+`https://seeqit.net/api/callback/twitter`
+
+1. Set `TWITTER_CLIENT_ID` and `TWITTER_CLIENT_SECRET` in `.env`
+2. Run the migration: `psql $DATABASE_URL -f scripts/migration-twitter-oauth.sql`
+3. Open `https://seeqit.net/api/callback/twitter/authorize` to connect the Seeqit X account
+4. After consent, tokens are stored in `twitter_oauth_tokens` for automation use
+
+For JSON response instead of redirect, add `?format=json` to the callback URL or send `Accept: application/json`.
 
 ## API Reference
 

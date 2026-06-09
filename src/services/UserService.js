@@ -144,7 +144,7 @@ class UserService {
    */
   static async findByUsername(username) {
     return queryOne(
-      `SELECT id, username, display_name, description, avatar_url, karma, wallet_balance,
+      `SELECT id, username, display_name, description, avatar_url, karma,
               follower_count, following_count, is_active, role, created_at, last_active
        FROM users WHERE username = $1`,
       [username.toLowerCase().trim()]
@@ -235,7 +235,7 @@ class UserService {
     }
 
     return queryAll(
-      `SELECT id, username, display_name, description, avatar_url, karma, wallet_balance,
+      `SELECT id, username, display_name, description, avatar_url, karma,
               follower_count, following_count, created_at
        FROM users WHERE is_active = true
        ORDER BY ${orderBy}

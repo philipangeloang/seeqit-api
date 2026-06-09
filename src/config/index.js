@@ -47,6 +47,14 @@ const config = {
     claimStartAt: process.env.MOLTBOOK_CLAIM_START_AT || null,
     claimEndAt: process.env.MOLTBOOK_CLAIM_END_AT || null
   },
+
+  // Twitter/X OAuth (automation callback at /api/callback/twitter)
+  twitter: {
+    clientId: process.env.TWITTER_CLIENT_ID || '',
+    clientSecret: process.env.TWITTER_CLIENT_SECRET || '',
+    callbackUrl: process.env.TWITTER_CALLBACK_URL || 'https://seeqit.net/api/callback/twitter',
+    scopes: process.env.TWITTER_SCOPES || 'tweet.read tweet.write users.read offline.access'
+  },
   
   // Pagination defaults
   pagination: {

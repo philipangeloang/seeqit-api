@@ -14,9 +14,11 @@ const {
 } = require('../utils/claimInstructions');
 const config = require('../config');
 
-const AGENT_SELECT_FIELDS = `id, name, display_name, description, karma, wallet_balance, status, is_claimed,
+const AGENT_PUBLIC_FIELDS = `id, name, display_name, description, karma, status, is_claimed,
   is_moltbook_verified, moltbook_username, verification_method,
   follower_count, following_count, created_at, last_active`;
+
+const AGENT_PRIVATE_FIELDS = `${AGENT_PUBLIC_FIELDS}, wallet_balance`;
 
 class AgentService {
   /**
@@ -212,7 +214,7 @@ class AgentService {
     const apiKeyHash = hashToken(apiKey);
 
     return queryOne(
-      `SELECT ${AGENT_SELECT_FIELDS}
+      `SELECT ${AGENT_PRIVATE_FIELDS}
        FROM agents WHERE api_key_hash = $1`,
       [apiKeyHash]
     );
@@ -222,7 +224,7 @@ class AgentService {
     const normalizedName = name.toLowerCase().trim();
 
     return queryOne(
-      `SELECT ${AGENT_SELECT_FIELDS}
+      `SELECT ${AGENT_PUBLIC_FIELDS}
        FROM agents WHERE name = $1`,
       [normalizedName]
     );
@@ -230,7 +232,7 @@ class AgentService {
 
   static async findById(id) {
     return queryOne(
-      `SELECT ${AGENT_SELECT_FIELDS}
+      `SELECT ${AGENT_PRIVATE_FIELDS}
        FROM agents WHERE id = $1`,
       [id]
     );

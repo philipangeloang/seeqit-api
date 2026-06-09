@@ -8,7 +8,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { success, created } = require('../utils/response');
 const AgentService = require('../services/AgentService');
-const { NotFoundError } = require('../utils/errors');
+const { NotFoundError, ForbiddenError } = require('../utils/errors');
 
 const router = Router();
 
@@ -41,7 +41,14 @@ router.post('/register', asyncHandler(async (req, res) => {
  * Get current agent profile
  */
 router.get('/me', requireAuth, asyncHandler(async (req, res) => {
-  success(res, { agent: req.agent || req.actor });
+  if (req.actor.type !== 'agent') {
+    throw new ForbiddenError('This endpoint is for agents only');
+  }
+  const agent = await AgentService.findById(req.actor.id);
+  if (!agent) {
+    throw new NotFoundError('Agent');
+  }
+  success(res, { agent });
 }));
 
 /**

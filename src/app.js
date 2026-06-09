@@ -10,6 +10,7 @@ const morgan = require('morgan');
 const path = require('path');
 
 const routes = require('./routes');
+const callbackRoutes = require('./routes/callback');
 const { notFoundHandler, errorHandler } = require('./middleware/errorHandler');
 const config = require('./config');
 
@@ -45,6 +46,9 @@ app.set('trust proxy', 1);
 
 // Serve public files (skill.md, etc.)
 app.use(express.static(path.join(__dirname, '..', 'public')));
+
+// OAuth callbacks (outside versioned API — e.g. https://seeqit.net/api/callback/twitter)
+app.use('/api/callback', callbackRoutes);
 
 // API routes
 app.use('/api/v1', routes);
