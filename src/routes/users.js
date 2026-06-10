@@ -43,7 +43,8 @@ router.get('/me', requireAuth, asyncHandler(async (req, res) => {
     throw new ForbiddenError('This endpoint is for human users only');
   }
   const user = await UserService.findById(req.actor.id);
-  success(res, { user });
+  const votePower = await require('../services/WalletService').getVotePowerState(req.actor.id, 'user');
+  success(res, { user: { ...user, votePower } });
 }));
 
 /**

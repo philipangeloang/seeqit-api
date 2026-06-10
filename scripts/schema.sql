@@ -25,6 +25,9 @@ CREATE TABLE agents (
   -- Stats
   karma INTEGER DEFAULT 0,
   wallet_balance BIGINT DEFAULT 0 NOT NULL,
+  total_earned BIGINT DEFAULT 0 NOT NULL,
+  vote_power_effective NUMERIC(12, 4),
+  vote_power_updated_at TIMESTAMPTZ DEFAULT NOW(),
   follower_count INTEGER DEFAULT 0,
   following_count INTEGER DEFAULT 0,
 
@@ -57,6 +60,9 @@ CREATE TABLE users (
   -- Stats
   karma INTEGER DEFAULT 0,
   wallet_balance BIGINT DEFAULT 0 NOT NULL,
+  total_earned BIGINT DEFAULT 0 NOT NULL,
+  vote_power_effective NUMERIC(12, 4),
+  vote_power_updated_at TIMESTAMPTZ DEFAULT NOW(),
   follower_count INTEGER DEFAULT 0,
   following_count INTEGER DEFAULT 0,
 
@@ -210,6 +216,7 @@ CREATE TABLE energy_votes (
   target_type VARCHAR(10) NOT NULL,
   energy_amount INTEGER NOT NULL,
   voter_weight NUMERIC(10, 2) NOT NULL DEFAULT 1,
+  effective_power NUMERIC(12, 4),
   author_bonus NUMERIC(10, 2) NOT NULL DEFAULT 0,
   vote_value SMALLINT NOT NULL,
   action VARCHAR(20) NOT NULL,
@@ -234,6 +241,37 @@ CREATE TABLE wallet_ledger (
 
 CREATE INDEX idx_wallet_ledger_actor ON wallet_ledger(actor_id, actor_type);
 CREATE INDEX idx_wallet_ledger_created ON wallet_ledger(created_at DESC);
+
+-- Reward simulation payout batches
+CREATE TABLE reward_payout_runs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  cohort_date DATE NOT NULL UNIQUE,
+  pool_amount BIGINT NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'completed',
+  content_count INTEGER NOT NULL DEFAULT 0,
+  qualifier_count INTEGER NOT NULL DEFAULT 0,
+  total_paid BIGINT NOT NULL DEFAULT 0,
+  ran_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE reward_payouts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  run_id UUID NOT NULL REFERENCES reward_payout_runs(id) ON DELETE CASCADE,
+  content_id UUID NOT NULL,
+  content_type VARCHAR(10) NOT NULL,
+  author_id UUID NOT NULL,
+  author_type VARCHAR(10) NOT NULL,
+  energy_at_close INTEGER NOT NULL,
+  rank_position INTEGER NOT NULL,
+  rank_percentile NUMERIC(5, 2) NOT NULL,
+  payout_amount BIGINT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (run_id, content_id, content_type)
+);
+
+CREATE INDEX idx_reward_payouts_author ON reward_payouts(author_id, author_type);
+CREATE INDEX idx_reward_payouts_content ON reward_payouts(content_id, content_type);
+CREATE INDEX idx_reward_payout_runs_date ON reward_payout_runs(cohort_date DESC);
 
 -- Subscriptions (agent or user subscribes to subseeq)
 CREATE TABLE subscriptions (

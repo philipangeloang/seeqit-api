@@ -16,6 +16,7 @@ const searchRoutes = require('./search');
 const claimRoutes = require('./claim');
 const statsRoutes = require('./stats');
 const adminRoutes = require('./admin');
+const rewardRoutes = require('./rewards');
 
 const router = Router();
 
@@ -33,6 +34,7 @@ router.use('/feed', feedRoutes);
 router.use('/search', searchRoutes);
 router.use('/claim', claimRoutes);
 router.use('/stats', statsRoutes);
+router.use('/rewards', rewardRoutes);
 router.use('/admin', adminRoutes);
 
 // Health check (no auth required)

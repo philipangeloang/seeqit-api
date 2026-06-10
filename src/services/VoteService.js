@@ -10,6 +10,7 @@ const {
   computeCounterDeltas,
   mapVoteDirection
 } = require('../utils/energy');
+const { applyVoteSpend } = require('../utils/votePower');
 const AgentService = require('./AgentService');
 const UserService = require('./UserService');
 const PostService = require('./PostService');
@@ -38,13 +39,17 @@ class VoteService {
 
   static async recordEnergyVote(client, {
     voterId, voterType, targetId, targetType,
-    energyAmount, voterWeight, authorBonus, voteValue, action
+    energyAmount, voterWeight, effectivePower, authorBonus, voteValue, action
   }) {
     await client.query(
       `INSERT INTO energy_votes
-         (voter_id, voter_type, target_id, target_type, energy_amount, voter_weight, author_bonus, vote_value, action)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [voterId, voterType, targetId, targetType, energyAmount, voterWeight, authorBonus, voteValue, action]
+         (voter_id, voter_type, target_id, target_type, energy_amount,
+          voter_weight, effective_power, author_bonus, vote_value, action)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        voterId, voterType, targetId, targetType, energyAmount,
+        voterWeight, effectivePower, authorBonus, voteValue, action
+      ]
     );
   }
 
@@ -78,6 +83,7 @@ class VoteService {
       newValue = value;
     }
 
+    const spendsPower = newValue !== null;
     const voteContext = await WalletService.getVoteContext(
       voterId,
       voterType,
@@ -85,11 +91,23 @@ class VoteService {
       target.author_type
     );
 
-    const { voterWeight, authorBonus } = voteContext;
+    const {
+      voterWeight,
+      maxPower,
+      effectivePower,
+      nextRegenAt,
+      regenEffective,
+      regenUpdatedAt,
+      authorBonus
+    } = voteContext;
+
+    const weightForEnergy = spendsPower ? effectivePower : voterWeight;
+    const appliedEffectivePower = spendsPower ? effectivePower : null;
+
     const { energyDelta, newApplied } = computeEnergyChange(
       oldApplied,
       newValue,
-      voterWeight,
+      weightForEnergy,
       authorBonus
     );
 
@@ -97,7 +115,23 @@ class VoteService {
     const karmaDelta = scoreDelta;
     const { upDelta, downDelta } = computeCounterDeltas(previousValue, newValue);
 
+    let powerAfterVote = regenEffective;
+    let powerUpdatedAt = regenUpdatedAt;
+
+    if (spendsPower) {
+      powerAfterVote = applyVoteSpend(regenEffective);
+      powerUpdatedAt = new Date();
+    }
+
     const result = await transaction(async (client) => {
+      await WalletService.persistVotePower(
+        voterId,
+        voterType,
+        spendsPower ? powerAfterVote : regenEffective,
+        spendsPower ? powerUpdatedAt : regenUpdatedAt,
+        client
+      );
+
       if (existingVote) {
         if (newValue === null) {
           await client.query('DELETE FROM votes WHERE id = $1', [existingVote.id]);
@@ -121,7 +155,8 @@ class VoteService {
         targetId,
         targetType,
         energyAmount: energyDelta,
-        voterWeight,
+        voterWeight: maxPower,
+        effectivePower: appliedEffectivePower ?? maxPower,
         authorBonus,
         voteValue: newValue ?? previousValue ?? value,
         action
@@ -154,6 +189,15 @@ class VoteService {
       return stats;
     });
 
+    const postVotePower = spendsPower
+      ? WalletService.resolveVotePower({
+          wallet_balance: voteContext.voterBalance,
+          vote_power_effective: powerAfterVote,
+          vote_power_updated_at: powerUpdatedAt,
+          total_earned: 0
+        })
+      : { effectivePower, maxPower, nextRegenAt };
+
     return {
       success: true,
       message: action === 'upvoted' ? 'Upvoted!' :
@@ -163,7 +207,17 @@ class VoteService {
       score: result.score,
       energy: result.energy,
       energyApplied: newApplied,
-      voterWeight,
+      voterWeight: maxPower,
+      maxPower,
+      effectivePower: spendsPower ? effectivePower : postVotePower.effectivePower,
+      nextRegenAt: spendsPower
+        ? WalletService.resolveVotePower({
+            wallet_balance: voteContext.voterBalance,
+            vote_power_effective: powerAfterVote,
+            vote_power_updated_at: powerUpdatedAt,
+            total_earned: 0
+          }).nextRegenAt
+        : nextRegenAt,
       authorBonus,
       userVote: mapVoteDirection(newValue)
     };
@@ -259,13 +313,8 @@ class VoteService {
     }));
   }
 
-  /**
-   * Get viewer's current vote weight for UI
-   */
-  static async getViewerVoteWeight(actorId, actorType) {
-    const balance = await WalletService.getBalance(actorId, actorType);
-    const { computeWeight } = require('../utils/energy');
-    return computeWeight(balance);
+  static async getViewerVotePower(actorId, actorType) {
+    return WalletService.getVotePowerState(actorId, actorType);
   }
 }
 

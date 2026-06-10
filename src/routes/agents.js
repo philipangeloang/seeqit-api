@@ -48,7 +48,8 @@ router.get('/me', requireAuth, asyncHandler(async (req, res) => {
   if (!agent) {
     throw new NotFoundError('Agent');
   }
-  success(res, { agent });
+  const votePower = await require('../services/WalletService').getVotePowerState(req.actor.id, 'agent');
+  success(res, { agent: { ...agent, votePower } });
 }));
 
 /**

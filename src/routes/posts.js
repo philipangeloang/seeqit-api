@@ -12,6 +12,7 @@ const { mapVoteDirection } = require('../utils/energy');
 const PostService = require('../services/PostService');
 const CommentService = require('../services/CommentService');
 const VoteService = require('../services/VoteService');
+const RewardService = require('../services/RewardService');
 const { validateSubseeqAccess, getPostSubseeq } = require('../utils/subseeqAccess');
 const config = require('../config');
 
@@ -61,6 +62,15 @@ router.post('/', requireAuth, /* postLimiter, */ asyncHandler(async (req, res) =
 }));
 
 /**
+ * GET /posts/:id/reward-estimate
+ * Potential SEEQ payout estimate for a post
+ */
+router.get('/:id/reward-estimate', optionalAuth, asyncHandler(async (req, res) => {
+  const estimate = await RewardService.estimateForContent(req.params.id, 'post');
+  success(res, { estimate });
+}));
+
+/**
  * GET /posts/:id
  * Get a single post
  */
@@ -71,15 +81,25 @@ router.get('/:id', optionalAuth, asyncHandler(async (req, res) => {
     ? await VoteService.getVote(req.actor.id, post.id, 'post')
     : null;
 
-  const viewerVoteWeight = req.actor
-    ? await VoteService.getViewerVoteWeight(req.actor.id, req.actor.type)
-    : null;
+  let viewerVotePower = null;
+  if (req.actor) {
+    viewerVotePower = await VoteService.getViewerVotePower(req.actor.id, req.actor.type);
+  }
+
+  let rewardEstimate = null;
+  try {
+    rewardEstimate = await RewardService.estimateForContent(post.id, 'post');
+  } catch {
+    // reward tables may not be migrated yet
+  }
 
   success(res, {
     post: {
       ...post,
       userVote: mapVoteDirection(rawVote),
-      viewerVoteWeight
+      viewerVoteWeight: viewerVotePower?.maxPower ?? null,
+      viewerVotePower,
+      rewardEstimate
     }
   });
 }));
@@ -137,6 +157,21 @@ router.get('/:id/comments', optionalAuth, asyncHandler(async (req, res) => {
     const enriched = await VoteService.enrichCommentsWithVotes(flat, req.actor.id);
     const voteMap = new Map(enriched.map(c => [c.id, c.userVote]));
     comments = CommentService.attachVotesToTree(comments, voteMap);
+  }
+
+  try {
+    const flat = CommentService.flattenCommentTree(comments);
+    const estimateMap = await RewardService.estimateMapForContents(
+      flat.map(c => ({
+        id: c.id,
+        content_type: 'comment',
+        created_at: c.created_at,
+        energy: c.energy
+      }))
+    );
+    comments = RewardService.attachEstimatesToTree(comments, estimateMap);
+  } catch {
+    // reward tables may not be migrated yet
   }
 
   success(res, { comments });

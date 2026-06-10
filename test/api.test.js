@@ -361,5 +361,77 @@ describe('Energy Utils', () => {
   });
 });
 
+describe('Vote Power Utils', () => {
+  const votePower = require('../src/utils/votePower');
+
+  test('regeneratePower doubles each 10-minute step up to max', () => {
+    const base = new Date('2026-06-10T12:00:00.000Z');
+    const after20 = new Date('2026-06-10T12:20:00.000Z');
+
+    const r = votePower.regeneratePower({
+      effective: 5,
+      maxPower: 19,
+      updatedAt: base,
+      now: after20
+    });
+
+    assertEqual(r.effective, 19);
+  });
+
+  test('applyVoteSpend halves effective power with floor at 1', () => {
+    assertEqual(votePower.applyVoteSpend(19), 9.5);
+    assertEqual(votePower.applyVoteSpend(1), 1);
+  });
+
+  test('buildPowerState returns nextRegenAt when below max', () => {
+    const anchor = new Date('2026-06-10T12:00:00.000Z');
+    const state = votePower.buildPowerState(5, 19, anchor, anchor);
+    assert(state.nextRegenAt, 'Should have next regen when below max');
+    assertEqual(state.effectivePower, 5);
+    assertEqual(state.maxPower, 19);
+  });
+});
+
+describe('Reward Service Logic', () => {
+  const RewardService = require('../src/services/RewardService');
+
+  test('rankCohort marks top 40% as qualifiers', () => {
+    const items = [
+      { id: '1', energy: 100 },
+      { id: '2', energy: 80 },
+      { id: '3', energy: 60 },
+      { id: '4', energy: 40 },
+      { id: '5', energy: 20 }
+    ];
+
+    const ranked = RewardService.rankCohort(items);
+    assertEqual(ranked.filter(i => i.qualifies).length, 2);
+    assert(ranked[0].qualifies, 'Top item qualifies');
+    assert(!ranked[4].qualifies, 'Bottom item does not qualify');
+  });
+
+  test('computePayouts splits pool proportionally among qualifiers', () => {
+    const ranked = RewardService.rankCohort([
+      { id: '1', energy: 100, rank: 1, qualifies: true, rankPercentile: 50, qualifierCount: 2, totalCount: 2 },
+      { id: '2', energy: 100, rank: 2, qualifies: true, rankPercentile: 100, qualifierCount: 2, totalCount: 2 },
+      { id: '3', energy: 10, rank: 3, qualifies: false, rankPercentile: 100, qualifierCount: 2, totalCount: 3 }
+    ]);
+
+    const payouts = RewardService.computePayouts(ranked, 1000);
+    const p1 = payouts.find(p => p.id === '1');
+    const p3 = payouts.find(p => p.id === '3');
+
+    assertEqual(p1.payoutAmount, 500);
+    assertEqual(p3.payoutAmount, 0);
+  });
+
+  test('getCohortDate uses UTC calendar day', () => {
+    assertEqual(
+      RewardService.getCohortDate('2026-06-10T23:30:00.000Z'),
+      '2026-06-10'
+    );
+  });
+});
+
 // Run
 runTests();

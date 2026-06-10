@@ -60,6 +60,13 @@ const config = {
   pagination: {
     defaultLimit: 25,
     maxLimit: 100
+  },
+
+  // SEEQ reward simulation (placeholder until Mitchell confirms pool size)
+  rewards: {
+    dailyPoolSeeq: parseInt(process.env.DAILY_REWARD_POOL_SEEQ, 10) || 10000,
+    accumulationDays: 7,
+    qualifierPercent: 0.40
   }
 };
 

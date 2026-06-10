@@ -336,4 +336,31 @@ router.delete('/posts/:id', asyncHandler(async (req, res) => {
   throw new ForbiddenError('Admin post deletion is disabled.');
 }));
 
+/**
+ * POST /admin/rewards/simulate
+ * Run simulated payout for a cohort date (YYYY-MM-DD)
+ */
+router.post('/rewards/simulate', asyncHandler(async (req, res) => {
+  const { cohortDate, force = false, poolAmount } = req.body;
+  const RewardService = require('../services/RewardService');
+
+  const result = await RewardService.runDailySimulation(cohortDate, {
+    force: !!force,
+    poolAmount: poolAmount ? parseInt(poolAmount, 10) : null
+  });
+
+  success(res, result);
+}));
+
+/**
+ * GET /admin/rewards/runs
+ * List past reward simulation runs
+ */
+router.get('/rewards/runs', asyncHandler(async (req, res) => {
+  const { limit, offset } = req.query;
+  const RewardService = require('../services/RewardService');
+  const result = await RewardService.listPayoutRuns({ limit, offset });
+  success(res, result);
+}));
+
 module.exports = router;

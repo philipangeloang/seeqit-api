@@ -9,9 +9,19 @@ const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { success, noContent } = require('../utils/response');
 const CommentService = require('../services/CommentService');
 const VoteService = require('../services/VoteService');
+const RewardService = require('../services/RewardService');
 const { validateSubseeqAccess, getCommentSubseeq } = require('../utils/subseeqAccess');
 
 const router = Router();
+
+/**
+ * GET /comments/:id/reward-estimate
+ * Potential SEEQ payout estimate for a comment
+ */
+router.get('/:id/reward-estimate', optionalAuth, asyncHandler(async (req, res) => {
+  const estimate = await RewardService.estimateForContent(req.params.id, 'comment');
+  success(res, { estimate });
+}));
 
 /**
  * GET /comments/:id
