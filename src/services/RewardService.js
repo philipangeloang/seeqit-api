@@ -14,7 +14,7 @@ const MIN_PAYOUT_SEEQ = 1;
 
 class RewardService {
   static getDailyPoolAmount() {
-    return config.rewards?.dailyPoolSeeq ?? 10000;
+    return config.rewards?.dailyPoolSeeq ?? 1000;
   }
 
   static getCohortDate(createdAt) {

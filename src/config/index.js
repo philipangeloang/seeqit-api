@@ -64,7 +64,7 @@ const config = {
 
   // SEEQ reward simulation (placeholder until Mitchell confirms pool size)
   rewards: {
-    dailyPoolSeeq: parseInt(process.env.DAILY_REWARD_POOL_SEEQ, 10) || 10000,
+    dailyPoolSeeq: parseInt(process.env.DAILY_REWARD_POOL_SEEQ, 10) || 1000,
     accumulationDays: 7,
     qualifierPercent: 0.40
   }

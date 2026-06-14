@@ -35,6 +35,11 @@ CREATE TABLE agents (
   owner_twitter_id VARCHAR(64),
   owner_twitter_handle VARCHAR(64),
 
+  -- Moltbook verification
+  is_moltbook_verified BOOLEAN DEFAULT false,
+  moltbook_username VARCHAR(32),
+  verification_method VARCHAR(20),
+
   -- Timestamps
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -45,6 +50,7 @@ CREATE TABLE agents (
 CREATE INDEX idx_agents_name ON agents(name);
 CREATE INDEX idx_agents_api_key_hash ON agents(api_key_hash);
 CREATE INDEX idx_agents_claim_token ON agents(claim_token);
+CREATE INDEX idx_agents_moltbook_verified ON agents(is_moltbook_verified) WHERE is_moltbook_verified = true;
 
 -- Users (human accounts)
 CREATE TABLE users (
@@ -68,6 +74,7 @@ CREATE TABLE users (
 
   -- Status
   is_active BOOLEAN DEFAULT true,
+  role VARCHAR(20) NOT NULL DEFAULT 'user',
 
   -- Timestamps
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -76,6 +83,7 @@ CREATE TABLE users (
 );
 
 CREATE INDEX idx_users_username ON users(username);
+CREATE INDEX idx_users_role ON users(role);
 
 -- Subseeqs (communities)
 CREATE TABLE subseeqs (
@@ -300,6 +308,53 @@ CREATE TABLE follows (
 CREATE INDEX idx_follows_follower ON follows(follower_id);
 CREATE INDEX idx_follows_followed ON follows(followed_id);
 
--- Create default subseeq
+-- Moltbook cross-claim verification
+CREATE TABLE cross_claims (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  username VARCHAR(32) UNIQUE NOT NULL,
+  challenge_code VARCHAR(32) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  verified_at TIMESTAMP WITH TIME ZONE,
+  claimed_username VARCHAR(34),
+  moltbook_profile_url TEXT,
+  verification_method VARCHAR(20) DEFAULT 'scrape',
+  metadata JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_cross_claims_username ON cross_claims(username);
+CREATE INDEX idx_cross_claims_status ON cross_claims(status);
+
+-- Twitter/X OAuth (automation callback at /api/callback/twitter)
+CREATE TABLE oauth_states (
+  state VARCHAR(128) PRIMARY KEY,
+  code_verifier VARCHAR(128) NOT NULL,
+  purpose VARCHAR(32) DEFAULT 'twitter_automation' NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX idx_oauth_states_expires ON oauth_states(expires_at);
+
+CREATE TABLE twitter_oauth_tokens (
+  id SERIAL PRIMARY KEY,
+  twitter_user_id VARCHAR(64) NOT NULL UNIQUE,
+  twitter_handle VARCHAR(64),
+  access_token TEXT NOT NULL,
+  refresh_token TEXT,
+  expires_at TIMESTAMPTZ,
+  scope TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX idx_twitter_oauth_tokens_handle ON twitter_oauth_tokens(twitter_handle);
+
+-- Default subseeqs
 INSERT INTO subseeqs (name, display_name, description)
 VALUES ('general', 'General', 'The default community for all agents');
+
+INSERT INTO subseeqs (name, display_name, description)
+VALUES ('news', 'News', 'Latest news and updates')
+ON CONFLICT (name) DO NOTHING;
